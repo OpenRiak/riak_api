@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_ssl: configuration for SSL/TLS connections over PB and HTTP
-%%
-%% Copyright (c) 2013-2014 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2013-2014 Basho Technologies, Inc.
+%% Copyright (c) 2018 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -21,7 +20,7 @@
 %% -------------------------------------------------------------------
 
 %% @doc Configuration and validation routines for SSL/TLS connections
-%% to clients.
+%% to clients over PB and HTTP.
 -module(riak_api_ssl).
 
 -export([options/0]).
@@ -35,6 +34,7 @@ options() ->
     CertFile = proplists:get_value(certfile, CoreSSL),
     KeyFile = proplists:get_value(keyfile, CoreSSL),
     Versions = app_helper:get_env(riak_api, tls_protocols, ['tlsv1.2']),
+    MaxCertChainDepth = app_helper:get_env(riak_api, max_cert_chain_depth),
     HonorCipherOrder = app_helper:get_env(riak_api, honor_cipher_order, false),
     CheckCRL = app_helper:get_env(riak_api, check_crl, false),
 
@@ -52,6 +52,10 @@ options() ->
      {verify, verify_peer},
      {reuse_sessions, false} %% required!
     ] ++
+    case MaxCertChainDepth of
+        undefined -> [];
+        _ -> [{depth, MaxCertChainDepth}]
+    end ++
     %% conditionally include the honor cipher order, don't pass it if it
     %% disabled because it will crash any
     %% OTP installs that lack the patch to

@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_kv_pb_socket: service protocol buffer clients
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%% Copyright (c) 2018 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -55,7 +54,8 @@
           security,
           retries = 3,
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
-          outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
+          outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer(), % frame buffer which we can use to optimize TCP sends
+          connection_id = undefined :: undefined | string()
          }).
 
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
@@ -84,20 +84,22 @@ service_registered(Pid, Mod) ->
 %% riak_api_pb_server.
 -spec init(list()) -> {ok, wait_for_socket, #state{}}.
 init([]) ->
+    ConnectionId = make_connection_id(),
     riak_api_stat:update(pbc_connect),
     ServiceStates = lists:foldl(fun(Service, States) ->
                                         orddict:store(Service, Service:init(), States)
                                 end,
                                 orddict:new(),
                                 riak_api_pb_registrar:services()),
-    {ok, wait_for_socket, #state{states=ServiceStates}}.
+    {ok, wait_for_socket, #state{states=ServiceStates, connection_id=ConnectionId}}.
 
 wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
 
-wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}}) ->
+wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}, connection_id=ConnectionId}) ->
     case Control:peername(Socket) of
         {ok, PeerInfo} ->
+            lager:notice("TCP_IP Connection established from ~p.  ConnectionId: ~s", [PeerInfo, ConnectionId]),
             Control:setopts(Socket, [{active, once}]),
             %% check if security is enabled, if it is wait for TLS, otherwise go
             %% straight into connected state
@@ -120,7 +122,8 @@ wait_for_socket(_Event, _From, State) ->
     {reply, unknown_message, wait_for_socket, State}.
 
 wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
-                                                    transport={Transport, _Control}}) ->
+                                                    transport={Transport, _Control},
+                                                    connection_id=ConnectionId}) ->
     case riak_pb_codec:msg_code(rpbstarttls) of
         MsgCode ->
             %% got STARTTLS msg, send ACK back to client
@@ -130,22 +133,36 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                 {ok, NewSocket} ->
                     CommonName = case ssl:peercert(NewSocket) of
                         {ok, Cert} ->
+                            riak_api_stat:update(pbc_ssl_client_auth),
                             OTPCert = public_key:pkix_decode_cert(Cert, otp),
-                            riak_core_ssl_util:get_common_name(OTPCert);
-                        {error, _Reason} ->
+                            CN = riak_core_ssl_util:get_common_name(OTPCert),
+                            lager:notice(
+                                "STARTTLS Trusted peer CN=~s connected from endpoint ~p.  ConnectionId: ~s",
+                                [CN, format_peername(State#state.peername), ConnectionId]
+                            ),
+                            CN;
+                        {error, Reason} ->
+                            riak_api_stat:update(pbc_ssl_client_anon),
+                            lager:notice(
+                                "STARTTLS Anonymous peer connected from endpoint ~p.  ConnectionId: ~s",
+                                [format_peername(State#state.peername), ConnectionId]
+                            ),
+                            lager:debug("Reason: ~p", [Reason]),
                             undefined
                     end,
-                    lager:debug("STARTTLS succeeded, peer's common name was ~p",
-                               [CommonName]),
                     {next_state, wait_for_auth,
                      State#state{socket=NewSocket, common_name=CommonName, transport={ssl,ssl}}};
                 {error, Reason} ->
-                    lager:warning("STARTTLS with client ~s failed: ~p",
-                                  [format_peername(State#state.peername), Reason]),
+                    riak_api_stat:update(pbc_ssl_fail),
+                    lager:notice("STARTTLS with client ~s and ConnectionId ~s failed: ~p",
+                                  [format_peername(State#state.peername), ConnectionId, Reason]),
                     {stop, {error, {startls_failed, Reason}}, State}
             end;
         _ ->
-            lager:debug("Client sent unexpected message code ~p", [MsgCode]),
+            lager:notice(
+                "STARTTLS Client ~s sent unexpected message code ~p.  ConnectionId: ~s",
+                [format_peername(State#state.peername), MsgCode, ConnectionId]
+            ),
             State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
                                  State),
             {next_state, wait_for_tls, State1}
@@ -157,7 +174,8 @@ wait_for_tls(_Event, _From, State) ->
     {reply, unknown_message, wait_for_tls, State}.
 
 wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
-                                                    transport={Transport,_Control}}) ->
+                                                    transport={Transport,_Control},
+                                                    connection_id=ConnectionId}) ->
     case riak_pb_codec:msg_code(rpbauthreq) of
         MsgCode ->
             %% got AUTH message, try to validate credentials
@@ -170,21 +188,26 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                                                                   {common_name,
                                                                    State#state.common_name}]) of
                 {ok, SecurityContext} ->
-                    lager:debug("authentication for ~p from ~p succeeded",
-                               [User, PeerIP]),
+                    riak_api_stat:update(pbc_authn_success),
+                    lager:notice(
+                        "AUTHN Authentication for user '~p' from address ~p succeeded.  ConnectionId: ~s",
+                        [binary_to_list(User), PeerIP, ConnectionId]
+                    ),
                     AuthResp = riak_pb_codec:msg_code(rpbauthresp),
                     Transport:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
                     {next_state, connected,
                      State#state{security=SecurityContext}};
                 {error, Reason} ->
                     %% Allow the client to reauthenticate, I guess?
-
+                    riak_api_stat:update(pbc_authn_fail),
                     %% Add a delay to make brute-force attempts more annoying
                     timer:sleep(5000),
-                    State1 = send_error_and_flush("Authentication failed",
-                                                  State),
-                    lager:debug("authentication for ~p from ~p failed: ~p",
-                               [User, PeerIP, Reason]),
+                    State1 = send_error_and_flush("Authentication failed", State),
+                    lager:notice(
+                        "AUTHN Authentication for user '~s' from address ~p failed.  ConnectionId: ~s",
+                        [binary_to_list(User), PeerIP, ConnectionId]
+                    ),
+                    lager:debug("Reason: ~p", [Reason]),
                     case State#state.retries of
                         N when N =< 1 ->
                             %% no more chances
@@ -205,11 +228,26 @@ wait_for_auth(_Event, State) ->
 wait_for_auth(_Event, _From, State) ->
     {reply, unknown_message, wait_for_auth, State}.
 
+normalize_permissions(Permission) when is_tuple(Permission) ->
+    %% single permission
+    [normalize_permission(Permission)];
+normalize_permissions([]) ->
+    [];
+normalize_permissions([Permission|Rest]) ->
+    [normalize_permission(Permission) | normalize_permissions(Rest)].
+
+normalize_permission({Operation}) ->
+    {Operation, undefined};
+normalize_permission({_Operation, _BKey} = Permission) ->
+    Permission.
+
+
+
 connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
-connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
+connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates, connection_id=ConnectionId}) ->
     try
         %% First find the appropriate service module to dispatch
         NewState = case riak_api_pb_registrar:lookup(MsgCode) of
@@ -225,13 +263,20 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                             undefined ->
                                 process_message(Service, Message, ServiceState, State);
                             SecCtx ->
-                                case riak_core_security:check_permissions(
-                                        Permissions, SecCtx) of
+                                User = riak_core_security:get_username(SecCtx),
+                                case riak_core_security:check_permissions(Permissions, SecCtx) of
                                     {true, NewCtx} ->
+                                        riak_api_stat:update(pbc_authz_success),
                                         process_message(Service, Message,
                                                         ServiceState,
                                                         State#state{security=NewCtx});
                                     {false, Error, NewCtx} ->
+                                        riak_api_stat:update(pbc_authz_fail),
+                                        {Operations, BKeys} = lists:unzip(normalize_permissions(Permissions)),
+                                        lager:notice(
+                                            "AUTHZ User '~s' DENIED permission for operations ~p on BKeys ~p.  ConnectionId: ~s",
+                                            [binary_to_list(User), Operations, BKeys, ConnectionId]
+                                        ),
                                         send_error(Error,
                                                    [],
                                                    State#state{security=NewCtx})
@@ -524,6 +569,13 @@ send_error_and_flush(Error, State) ->
 
 format_peername({IP, Port}) ->
     io_lib:format("~s:~B", [inet_parse:ntoa(IP), Port]).
+
+make_connection_id() ->
+    binary_to_list(
+        base64:encode(
+            term_to_binary(erlang:make_ref())
+        )
+    ).
 
 -ifdef(TEST).
 

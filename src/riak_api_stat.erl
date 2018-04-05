@@ -1,5 +1,7 @@
 %% -------------------------------------------------------------------
-%% Copyright (c) 2007-2011 Basho Technologies, Inc.  All Rights Reserved.
+%%
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%% Copyright (c) 2018 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -56,6 +58,20 @@ get_stats() ->
 produce_stats() ->
     {?APP, riak_core_stat_q:get_stats([riak_api])}.
 
+update(pbc_ssl_client_auth=Arg) ->
+    update1(Arg);
+update(pbc_ssl_client_anon=Arg) ->
+    update1(Arg);
+update(pbc_ssl_fail=Arg) ->
+    update1(Arg);
+update(pbc_authn_success=Arg) ->
+    update1(Arg);
+update(pbc_authn_fail=Arg) ->
+    update1(Arg);
+update(pbc_authz_success=Arg) ->
+    update1(Arg);
+update(pbc_authz_fail=Arg) ->
+    update1(Arg);
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
 
@@ -86,16 +102,25 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-    exometer:update([riak_core_stat:prefix(), ?APP, pbc_connects], 1).
+    exometer:update([riak_core_stat:prefix(), ?APP, pbc_connects], 1);
+update1(Name) ->
+    exometer:update([riak_core_stat:prefix(), ?APP, Name], 1).
 
 %% -------------------------------------------------------------------
 %% Private
 %% -------------------------------------------------------------------
 stats() ->
     [
-     {pbc_connects, spiral, [], [{one, pbc_connects},
+        {pbc_connects, spiral, [], [{one, pbc_connects},
                                  {count, pbc_connects_total}]},
-     {[pbc_connects, active], {function, ?MODULE, active_pb_connects}, [], [{value, pbc_active}]}
+        {[pbc_connects, active], {function, ?MODULE, active_pb_connects}, [], [{value, pbc_active}]},
+        {pbc_ssl_client_auth, counter, [], [{value, pbc_ssl_client_auth}]},
+        {pbc_ssl_client_anon, counter, [], [{value, pbc_ssl_client_anon}]},
+        {pbc_ssl_fail, counter, [], [{value, pbc_ssl_fail}]},
+        {pbc_authn_success, counter, [], [{value, pbc_authn_success}]},
+        {pbc_authn_fail, counter, [], [{value, pbc_authn_fail}]},
+        {pbc_authz_success, counter, [], [{value, pbc_authz_success}]},
+        {pbc_authz_fail, counter, [], [{value, pbc_authz_fail}]}
     ].
 
 active_pb_connects(_) ->

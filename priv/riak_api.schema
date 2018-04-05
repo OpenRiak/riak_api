@@ -167,6 +167,16 @@
   hidden
 ]}.
 
+%% @doc Maximum number of non-self-issued intermediate certificates that can
+%% follow the peer certificate in a valid certification path.  This maps
+%% directly to the "depth" option for client and server ssl endpoints
+%% described in http://erlang.org/doc/man/ssl.html
+{mapping, "max_cert_chain_depth", "riak_api.max_cert_chain_depth", [
+  {datatype, integer},
+  {default, 1},
+  hidden
+]}.
+
 {translation,
  "riak_api.check_crl",
  fun(Conf) ->
