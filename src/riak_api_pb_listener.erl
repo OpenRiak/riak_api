@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_pb_listener: Listen for protocol buffer clients
-%%
-%% Copyright (c) 2007-2012 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2015 Basho Technologies, Inc.
+%% Copyright (c) 2022 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -29,6 +28,8 @@
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
 -export([get_listeners/0]).
+-export([wait_for_listener_ready/0]).
+
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
@@ -48,6 +49,15 @@ sock_opts() ->
     NoDelay = app_helper:get_env(riak_api, disable_pb_nagle, true),
     KeepAlive = app_helper:get_env(riak_api, pb_keepalive, true),
     [binary, {packet, raw}, {reuseaddr, true}, {backlog, BackLog}, {nodelay, NoDelay}, {keepalive, KeepAlive}].
+
+wait_for_listener_ready() ->
+    case lists:member(riak_kv, riak_core_node_watcher:services(node())) of
+        true ->
+            ok;
+        _ ->
+            timer:sleep(500),
+            wait_for_listener_ready()
+    end.
 
 %% @doc The handle_call/3 gen_nb_server callback. Unused.
 -spec handle_call(term(), {pid(),_}, #state{}) -> {reply, term(), #state{}}.
