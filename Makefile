@@ -1,5 +1,5 @@
 .PHONY: compile rel cover test dialyzer
-REBAR=./rebar3
+REBAR ?= ./rebar3
 
 compile:
 	$(REBAR) compile
