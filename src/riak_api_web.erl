@@ -1,8 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_web: setup Riak's HTTP interface
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2013-2014 Basho Technologies, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -28,6 +26,8 @@
 -export([get_listeners/0,
          binding_config/2]).
 
+-include_lib("kernel/include/logger.hrl").
+
 get_listeners() ->
     get_listeners(http) ++ get_listeners(https).
 
@@ -37,7 +37,7 @@ get_listeners(Scheme) ->
                     {riak_api, Scheme, List} when is_list(List) ->
                         List;
                     {riak_core, Scheme, List} when is_list(List) ->
-                        lager:warning("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
+                        ?LOG_WARNING("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
                         List;
                     _ ->
                         []
@@ -54,7 +54,7 @@ binding_config(Scheme, Binding) ->
      permanent, 5000, worker, [mochiweb_socket_server]}.
 
 spec_from_binding(http, Name, {Ip, Port}) ->
-    Options = 
+    Options =
         lists:flatten([{name, Name},
                     {ip, Ip},
                     {port, Port},
@@ -62,7 +62,7 @@ spec_from_binding(http, Name, {Ip, Port}) ->
                     common_config()),
     add_recbuf(Options);
 spec_from_binding(https, Name, {Ip, Port}) ->
-    Options = 
+    Options =
         lists:flatten([{name, Name},
                     {ip, Ip},
                     {port, Port},

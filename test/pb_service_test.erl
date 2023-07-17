@@ -1,16 +1,40 @@
+%% -------------------------------------------------------------------
+%%
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
 -module(pb_service_test).
+-behaviour(riak_api_pb_service).
+
 -compile([export_all, nowarn_export_all]).
--include_lib("eunit/include/eunit.hrl").
 
 %% ===================================================================
 %% Implement a dumb PB service
 %% ===================================================================
--behaviour(riak_api_pb_service).
+
 -export([init/0,
          decode/2,
          encode/1,
          process/2,
          process_stream/3]).
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -define(MSGMIN, 99).
 -define(MSGMAX, 109).
@@ -86,13 +110,10 @@ process_stream(_, _, State) ->
 %% Eunit tests
 %% ===================================================================
 setup() ->
-    application:load(lager),
     application:load(riak_api),
     LogFile = filename:join([code:priv_dir(riak_api), "pb_service_test.log"]),
 
     error_logger:tty(false),
-    application:set_env(lager, handlers, [{lager_file_backend, [{LogFile, debug, 10485760, "$D0", 5}]}]),
-    application:set_env(lager, error_logger_redirect, true),
 
     %% Need riak_core.security capability, let's fake it
     ets:new(riak_capability_ets, [named_table, {read_concurrency, true}]),
@@ -101,7 +122,6 @@ setup() ->
     OldListeners = app_helper:get_env(riak_api, pb, [{"127.0.0.1", 8087}]),
     application:set_env(riak_api, pb, [{"127.0.0.1", 32767}]),
 
-    lager:start(),
     {ok, Sup} = riak_api_sup:start_link(),
     unlink(Sup),
     wait_for_port(),
@@ -114,7 +134,6 @@ cleanup({L, Sup}) ->
     ets:delete(riak_capability_ets),
     exit(Sup, normal),
     application:set_env(riak_api, pb, L),
-    application:stop(lager),
     ok.
 
 request_multi(Payloads) when is_list(Payloads) ->
@@ -248,7 +267,7 @@ wait_for_port() ->
     wait_for_port(10000).
 
 wait_for_port(Timeout) when is_integer(Timeout) ->
-    lager:debug("Waiting for PB Port within timeout ~p", [Timeout]),
+    ?LOG_DEBUG("Waiting for PB Port within timeout ~p", [Timeout]),
     TRef = erlang:send_after(Timeout, self(), timeout),
     wait_for_port(TRef);
 wait_for_port(TRef) ->
@@ -264,13 +283,13 @@ wait_for_port(TRef) ->
                  end),
     receive
         timeout ->
-            lager:error("PB port did not come up within timeout"),
+            ?LOG_ERROR("PB port did not come up within timeout"),
             {error, timeout};
         {error, Reason} ->
-            lager:debug("Waiting for PB port failed: ~p", [Reason]),
+            ?LOG_DEBUG("Waiting for PB port failed: ~p", [Reason]),
             wait_for_port(TRef);
         connected ->
             erlang:cancel_timer(TRef),
-            lager:debug("PB port is up"),
+            ?LOG_DEBUG("PB port is up"),
             ok
     end.

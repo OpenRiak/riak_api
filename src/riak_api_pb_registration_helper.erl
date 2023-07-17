@@ -1,8 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_pb_registration_helper: PB API Registration table manager
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -20,15 +18,15 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc A gen_server process that creates and serves as heir to the
+%% @doc PB API Registration table manager.
+%%
+%% A gen_server process that creates and serves as heir to the
 %% message-code registration ETS table. Should the registrar process
 %% exit, this server will inherit the ETS table and hand it back to
 %% the registrar process when it restarts.
 -module(riak_api_pb_registration_helper).
 
 -behaviour(gen_server).
-
--include("riak_api_pb_registrar.hrl").
 
 %% API
 -export([start_link/0,
@@ -39,6 +37,10 @@
          terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
+
+-include_lib("kernel/include/logger.hrl").
+
+-include("riak_api_pb_registrar.hrl").
 
 %%%===================================================================
 %%% API
@@ -87,7 +89,7 @@ init([]) ->
         List when is_list(List) ->
             %% This process must have been restarted, because the table
             %% already exists. Let's try to become the heir again.
-            lager:debug("PB registration helper restarted as ~p, becoming heir", [self()]),
+            ?LOG_DEBUG("PB registration helper restarted as ~p, becoming heir", [self()]),
             riak_api_pb_registrar:set_heir(self()),
             {ok, undefined}
     end.
@@ -105,7 +107,7 @@ handle_call(claim_table, {Pid, _Tag}, State) ->
     %% The registrar is (re-)claiming the table, let's give it away. We
     %% assume this process is the heir, which is set on startup or
     %% transfer of the table.
-    lager:debug("Giving away PB registration table to ~p", [Pid]),
+    ?LOG_DEBUG("Giving away PB registration table to ~p", [Pid]),
     ets:give_away(?ETS_NAME, Pid, undefined),
     Reply = ok,
     {reply, Reply, State};
@@ -138,7 +140,7 @@ handle_cast(_Msg, State) ->
 handle_info({'ETS-TRANSFER', ?ETS_NAME, FromPid, _HeirData}, State) ->
     %% The registrar process exited and transferred the table back to
     %% the helper.
-    lager:debug("PB Registrar ~p exited, ~p received table", [FromPid, self()]),
+    ?LOG_DEBUG("PB Registrar ~p exited, ~p received table", [FromPid, self()]),
     {noreply, State};
 
 handle_info(_Info, State) ->

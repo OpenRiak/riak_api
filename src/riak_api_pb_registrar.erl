@@ -1,8 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_pb_registrar: Riak Client APIs Protocol Buffers Service Registration
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -20,7 +18,9 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Encapsulates the Protocol Buffers service registration and
+%% @doc Riak Client APIs Protocol Buffers Service Registration.
+%%
+%% Encapsulates the Protocol Buffers service registration and
 %% deregistration as a gen_server process. This is used to serialize
 %% write access to the registration table so that it is less prone to
 %% race-conditions.
@@ -52,6 +52,8 @@
           owned = false :: boolean() %% Whether the registrar owns the table yet
          }).
 
+-include_lib("kernel/include/logger.hrl").
+
 -include("riak_api_pb_registrar.hrl").
 
 %% gen_server callbacks
@@ -80,7 +82,7 @@ deregister(Registrations) ->
         exit:{noproc, _} ->
             %% We assume riak_api is shutting down, and so silently
             %% ignore the deregistration.
-            lager:debug("Deregistration ~p ignored, ~s not present", [Registrations, ?SERVER]),
+            ?LOG_DEBUG("Deregistration ~p ignored, ~s not present", [Registrations, ?SERVER]),
             ok
     end.
 

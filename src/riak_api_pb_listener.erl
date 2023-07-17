@@ -56,6 +56,8 @@
     get_listeners/0
 ]).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% ===================================================================
 %% Types
 %% ===================================================================
@@ -133,20 +135,20 @@ handle_continue(?ASYNC_INIT_CONTINUE_MSG,
             {stop, LError, State}
     end;
 handle_continue(Continue, State) ->
-    lager:error("unhandled continuation ~0p", [Continue]),
+    ?LOG_ERROR("unhandled continuation ~0p", [Continue]),
     {stop, {badarg, [Continue, State]}, State}.
 
 %% @doc Unused required `gen_server' callback.
 -spec handle_call(term(), {pid(), term()}, state())
         -> {reply, term(), state()}.
 handle_call(Request, From, State) ->
-    lager:warning("unhandled request ~0p from ~0p", [Request, From]),
+    ?LOG_WARNING("unhandled request ~0p from ~0p", [Request, From]),
     {reply, not_implemented, State}.
 
 %% @doc Unused required `gen_server' callback.
 -spec handle_cast(Message :: term(), State :: state()) -> {noreply, state()}.
 handle_cast(Message, State) ->
-    lager:warning("unhandled message ~0p", [Message]),
+    ?LOG_WARNING("unhandled message ~0p", [Message]),
     {noreply, State}.
 
 %% @doc Message callback for `gen_server' behavior.
@@ -169,12 +171,12 @@ handle_info({inet_async, ListSock, _Ref, {ok, CliSocket}}, StateIn) ->
                     {stop, CReason, StateIn}
             end;
         _ ->
-            lager:error("Failed to register socket ~w", [CliSocket]),
+            ?LOG_ERROR("Failed to register socket ~w", [CliSocket]),
             _ = gen_tcp:close(CliSocket),
             {stop, {badarg, [CliSocket]}, StateIn}
     end;
 handle_info(Message, State) ->
-    lager:warning("Unhandled message ~0p", [Message]),
+    ?LOG_WARNING("Unhandled message ~0p", [Message]),
     {noreply, State}.
 
 %% @doc Termination callback for `gen_server' behavior.
@@ -183,10 +185,10 @@ terminate(Reason, #pbl_state{sock = undefined} = State) ->
     %% If the socket is undefined then we're in the asynchronous
     %% initialization phase and handle_continue/2 hasn't been called yet,
     %% so there's nothing to clean up.
-    lager:debug("terminate(~0p) with state: ~0p", [Reason, State]);
+    ?LOG_DEBUG("terminate(~0p) with state: ~0p", [Reason, State]);
 terminate(Reason, #pbl_state{sock = Socket} = State) ->
     _ = gen_tcp:close(Socket),
-    lager:debug("terminate(~0p) with state: ~0p", [Reason, State]).
+    ?LOG_DEBUG("terminate(~0p) with state: ~0p", [Reason, State]).
 
 %% ===================================================================
 %% riak_api_sup callback
@@ -249,7 +251,7 @@ wait_for_listener_ready() ->
 -spec wait_for_node_service_watcher() -> ok.
 wait_for_node_service_watcher() ->
     RegisteredService = riak_core_node_watcher,
-    lager:debug("checking ~s", [RegisteredService]),
+    ?LOG_DEBUG("checking ~s", [RegisteredService]),
     case erlang:whereis(RegisteredService) of
         undefined ->
             timer:sleep(?WAIT_FOR_NODE_WATCHER_RETRY_INTERVAL),
@@ -266,7 +268,7 @@ wait_for_node_service_watcher() ->
 %% Returns `ok' only when listener requests can be handled successfully
 -spec wait_for_node_kv_service(Node :: node()) -> ok.
 wait_for_node_kv_service(Node) ->
-    lager:debug("checking for KV service on ~w", [Node]),
+    ?LOG_DEBUG("checking for KV service on ~w", [Node]),
     case lists:member(riak_kv, riak_core_node_watcher:services(Node)) of
         true ->
             ok;
@@ -287,7 +289,7 @@ get_deprecated(Key) ->
         undefined ->
             undefined;
         Val ->
-            lager:warning(
+            ?LOG_WARNING(
                 "The config riak_api/~s has been deprecated and will be removed."
                 " Use riak_api/pb (IP/Port pairs) in the future.", [Key]),
             Val

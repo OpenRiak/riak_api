@@ -27,6 +27,8 @@
 -export([start_link/0,
          init/1]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
 -define(LNAME(IP, Port), lists:flatten(io_lib:format("pb://~p:~p", [IP, Port]))).
@@ -55,7 +57,7 @@ init([]) ->
 %% Generates child specs from the HTTP/HTTPS listener configuration.
 %% @private
 web_processes([]) ->
-    lager:info("No HTTP/HTTPS listeners were configured, HTTP connections will be disabled."),
+    ?LOG_INFO("No HTTP/HTTPS listeners were configured, HTTP connections will be disabled."),
     [];
 web_processes(Listeners) ->
     lists:flatten([ web_listener_spec(Scheme, Binding) ||
