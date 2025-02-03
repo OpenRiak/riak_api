@@ -49,12 +49,11 @@ start_link() ->
       MaxT :: pos_integer(),
       ChildSpec :: supervisor:child_spec().
 init([]) ->
-    Helper = ?CHILD(riak_api_pb_registration_helper, worker),
     Registrar = ?CHILD(riak_api_pb_registrar, worker),
     PBProcesses = pb_processes(riak_api_pb_listener:get_listeners()),
     WebProcesses = web_processes(riak_api_web:get_listeners()),
     NetworkProcesses = PBProcesses ++ WebProcesses,
-    {ok, {{one_for_one, 10, 10}, [Helper, Registrar|NetworkProcesses]}}.
+    {ok, {{one_for_one, 10, 10}, [Registrar|NetworkProcesses]}}.
 
 %% Generates child specs from the HTTP/HTTPS listener configuration.
 %% @private

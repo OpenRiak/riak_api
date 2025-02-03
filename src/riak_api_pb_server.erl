@@ -55,7 +55,7 @@
           transport = {gen_tcp, inet} :: {gen_tcp, inet} | {ssl, ssl},
           socket :: port() | ssl:sslsocket(),   % socket
           req,                % current request
-          states :: orddict:orddict(),    % per-service connection state
+          states :: #{module() => term()},    % per-service connection state
           peername :: undefined | {inet:ip_address(), pos_integer()},
           common_name :: undefined | string(),
           security,
@@ -101,11 +101,14 @@ service_registered(Pid, Mod) ->
 -spec init(list()) -> {ok, wait_for_socket, #state{}}.
 init([]) ->
     riak_api_stat:update(pbc_connect),
-    ServiceStates = lists:foldl(fun(Service, States) ->
-                                        orddict:store(Service, Service:init(), States)
-                                end,
-                                orddict:new(),
-                                riak_api_pb_registrar:services()),
+    ServiceStates =
+        lists:foldl(
+            fun(Service, States) ->
+                maps:put(Service, Service:init(), States)
+            end,
+            maps:new(),
+            riak_api_pb_registrar:services()
+        ),
     {ok, wait_for_socket, #state{states=ServiceStates}}.
 
 wait_for_socket(_Event, State) ->
@@ -230,7 +233,7 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
         %% First find the appropriate service module to dispatch
         NewState = case riak_api_pb_registrar:lookup(MsgCode) of
             {ok, Service} ->
-                ServiceState = orddict:fetch(Service, ServiceStates),
+                ServiceState = maps:get(Service, ServiceStates),
                 %% Decode the message according to the service
                 case Service:decode(MsgCode, MsgData) of
                     {ok, Message} ->
@@ -283,16 +286,21 @@ handle_event({registered, Service}, StateName, #state{states=ServiceStates}=Stat
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
     %% new capabilities.
-    case orddict:is_key(Service, ServiceStates) of
+    case maps:is_key(Service, ServiceStates) of
         true ->
             %% This is an existing service registering
             %% disjoint message codes
             {next_state, StateName, State, 0};
         false ->
             %% This is a new service registering
-            {next_state, StateName,
-             State#state{states=orddict:store(Service, Service:init(),
-                                              ServiceStates)}, 0}
+            {
+                next_state,
+                StateName,
+                State#state{
+                    states=maps:put(Service, Service:init(),ServiceStates)
+                },
+                0
+            }
     end;
 handle_event(_Msg, StateName, State) ->
     {next_state, StateName, State, 0}.
@@ -460,13 +468,13 @@ update_service_state(Service, NewServiceState, _OldServiceState, #state{req={Ser
     %% While streaming, we avoid extra fetches of the state by
     %% including it in the current request field. When req is
     %% undefined (set at the end of the stream), it will be updated
-    %% into the orddict.
+    %% into the map.
     ServerState#state{req={Service,ReqId,NewServiceState}};
 update_service_state(_Service, OldServiceState, OldServiceState, ServerState) ->
     %% If the service state is unchanged, don't bother storing it again.
     ServerState;
 update_service_state(Service, NewServiceState, _OldServiceState, #state{states=ServiceStates}=ServerState) ->
-    NewServiceStates = orddict:store(Service, NewServiceState, ServiceStates),
+    NewServiceStates = maps:put(Service, NewServiceState, ServiceStates),
     ServerState#state{states=NewServiceStates}.
 
 %% @doc Given an unencoded response message, attempts to encode it and send it
@@ -545,17 +553,8 @@ format_peername({IP, Port}) ->
 
 receive_closed_socket_test_() ->
     {setup,
-     fun() ->
-             %% Create the registration table so the server will start up.
-             try ets:new(?ETS_NAME, ?ETS_OPTS) of
-                 ?ETS_NAME -> true
-             catch
-                 _:badarg -> false
-             end
-     end,
-     fun(true) -> ets:delete(?ETS_NAME);
-        (_) -> ok
-     end,
+     fun() -> ok end,
+     fun(_) -> ok end,
      ?_test(
         begin
             %% Pretend that we're a listener, listen on any port
