@@ -87,15 +87,14 @@ process_stream(_, _, State) ->
 %% ===================================================================
 %% Eunit tests
 %% ===================================================================
+
+-include("riak_api_pb_registrar.hrl").
+
 setup() ->
-    application:load(lager),
     application:load(riak_api),
-    LogFile = filename:join([code:priv_dir(riak_api), "pb_service_test.log"]),
 
     error_logger:tty(false),
-    application:set_env(lager, handlers, [{lager_file_backend, [{LogFile, debug, 10485760, "$D0", 5}]}]),
-    application:set_env(lager, error_logger_redirect, true),
-
+    
     %% Need riak_core.security capability, let's fake it
     ets:new(riak_capability_ets, [named_table, {read_concurrency, true}]),
     ets:insert(riak_capability_ets, {{riak_core, security}, false}),
@@ -115,6 +114,14 @@ cleanup({L, Sup}) ->
     ets:delete(riak_capability_ets),
     exit(Sup, normal),
     application:set_env(riak_api, pb, L),
+    case is_process_alive(Sup) of
+        true ->
+            % If startup too quick after cleanup, may still be alive
+            timer:sleep(10),
+            false = is_process_alive(Sup);
+        _ ->
+            ok
+    end,
     ok.
 
 request_multi(Payloads) when is_list(Payloads) ->
