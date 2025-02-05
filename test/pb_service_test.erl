@@ -114,18 +114,14 @@ cleanup({L, Sup}) ->
     ets:delete(riak_capability_ets),
     exit(Sup, normal),
     application:set_env(riak_api, pb, L),
-    lists:foreach(
-        fun(PKT) ->
-            case PKT of
-                {{Name, Code}, Service}
-                        when Name == ?ETS_NAME, is_atom(Service) ->
-                    persistent_term:erase({Name, Code});
-                _ ->
-                    ok
-            end
-        end,
-        persistent_term:get()
-    ),
+    case is_process_alive(Sup) of
+        true ->
+            % If startup too quick after cleanup, may still be alive
+            timer:sleep(10),
+            false = is_process_alive(Sup);
+        _ ->
+            ok
+    end,
     ok.
 
 request_multi(Payloads) when is_list(Payloads) ->

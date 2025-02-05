@@ -53,6 +53,7 @@ init([]) ->
     PBProcesses = pb_processes(riak_api_pb_listener:get_listeners()),
     WebProcesses = web_processes(riak_api_web:get_listeners()),
     NetworkProcesses = PBProcesses ++ WebProcesses,
+    riak_api_pb_registrar:clear_all(),
     {ok, {{one_for_one, 10, 10}, [Registrar|NetworkProcesses]}}.
 
 %% Generates child specs from the HTTP/HTTPS listener configuration.

@@ -42,6 +42,7 @@
          register/1,
          deregister/1,
          swap/3,
+         clear_all/0,
          services/0,
          lookup/1
         ]).
@@ -107,6 +108,20 @@ services() ->
             end,
             persistent_term:get()
         )
+    ).
+
+-spec clear_all() -> ok.
+clear_all() ->
+    lists:foreach(
+        fun({K, _V}) ->
+            case K of
+                {Name, Code} when Name == ?ETS_NAME ->
+                    persistent_term:erase({Name, Code});
+                _ ->
+                    ok
+            end
+        end,
+        persistent_term:get()
     ).
 
 %% @doc Looks up the registration of a given message code.
