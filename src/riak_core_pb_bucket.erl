@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_core_pb_bucket: Expose Core bucket functionality to Protocol Buffers
-%%
-%% Copyright (c) 2012 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -48,7 +47,9 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3]).
+         process/3,
+         process_stream/3,
+         process_stream/4]).
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 
@@ -76,7 +77,10 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket properties
-process(#rpbgetbucketreq{type=T, bucket=B}, State) ->
+process(Req=#rpbgetbucketreq{}, State) ->
+    process(Req, State, []).
+
+process(#rpbgetbucketreq{type=T, bucket=B}, State, _Options) ->
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:get_bucket(Bucket) of
         {error, no_type} ->
@@ -87,7 +91,7 @@ process(#rpbgetbucketreq{type=T, bucket=B}, State) ->
     end;
 
 %% Set bucket properties
-process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
+process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State, _Options) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:set_bucket(Bucket, Props) of
@@ -100,12 +104,15 @@ process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
     end;
 
 %% Reset bucket properties
-process(#rpbresetbucketreq{type = T, bucket=B}, State) ->
+process(#rpbresetbucketreq{type = T, bucket=B}, State, _Options) ->
     Bucket = maybe_create_bucket_type(T, B),
     riak_core_bucket:reset_bucket(Bucket),
     {reply, rpbresetbucketresp, State}.
 
 process_stream(_, _, State) ->
+    {ignore, State}.
+
+process_stream(_, _, State, _) ->
     {ignore, State}.
 
 maybe_create_bucket_type(<<"default">>, Bucket) ->

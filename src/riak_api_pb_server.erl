@@ -1,6 +1,7 @@
 %% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2012 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -52,6 +53,7 @@
           common_name :: undefined | string(),
           security,
           retries = 3,
+          recv_time :: integer(), % timestamp when a message is received (native erlang time)
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
           outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
@@ -103,7 +105,7 @@ init([]) ->
                                 end,
                                 orddict:new(),
                                 riak_api_pb_registrar:services()),
-    {ok, wait_for_socket, #state{states=ServiceStates}}.
+    {ok, wait_for_socket, #state{states=ServiceStates, recv_time = 0}}.
 
 wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
@@ -224,6 +226,7 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
 connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
     try
+        MsgRecvd = erlang:monotonic_time(), % Track message timing
         %% First find the appropriate service module to dispatch
         NewState = case riak_api_pb_registrar:lookup(MsgCode) of
             {ok, Service} ->
@@ -232,18 +235,21 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                 case Service:decode(MsgCode, MsgData) of
                     {ok, Message} ->
                         %% Process the message
-                        process_message(Service, Message, ServiceState, State);
+                        process_message(Service, Message,
+                            ServiceState, State#state{recv_time=MsgRecvd});
                     {ok, Message, Permissions} ->
                         case State#state.security of
                             undefined ->
-                                process_message(Service, Message, ServiceState, State);
+                                process_message(Service, Message,
+                                    ServiceState, State#state{recv_time=MsgRecvd});
                             SecCtx ->
                                 case riak_core_security:check_permissions(
                                         Permissions, SecCtx) of
                                     {true, NewCtx} ->
                                         process_message(Service, Message,
                                                         ServiceState,
-                                                        State#state{security=NewCtx});
+                                                        State#state{security=NewCtx,
+                                                                    recv_time=MsgRecvd});
                                     {false, Error, NewCtx} ->
                                         send_error(Error,
                                                    [],
@@ -311,7 +317,7 @@ handle_info({Proto, Socket, Bin}, StateName, State=#state{req=undefined,
                                               inbuffer=InBuffer}) when
         Proto == tcp; Proto == ssl ->
     %% Because we do our own outbound framing, we need to do our own
-    %% inbound deframing.
+    %% inbound de-framing.
     NewBuffer = <<InBuffer/binary, Bin/binary>>,
     decode_buffer(StateName, State#state{inbuffer=NewBuffer});
 handle_info({Proto, Socket, _Data}, _SN, State=#state{socket=Socket}) when
@@ -396,7 +402,8 @@ decode_buffer(StateName, State=#state{socket=Socket,
 %% and decoded.
 -spec process_message(atom(), term(), term(), #state{}) -> #state{}.
 process_message(Service, Message, ServiceState, ServerState) ->
-    case Service:process(Message, ServiceState) of
+    case Service:process(Message, ServiceState,
+                        #{recv_time => ServerState#state.recv_time}) of
         %% Streaming reply with reference
         {reply, {stream, ReqId}, NewServiceState} ->
             update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId,NewServiceState}});
@@ -419,7 +426,8 @@ process_message(Service, Message, ServiceState, ServerState) ->
 %% them.
 -spec process_stream(module(), term(), term(), term(), #state{}) -> #state{}.
 process_stream(Service, ReqId, Message, ServiceState0, State) ->
-    case Service:process_stream(Message, ReqId, ServiceState0) of
+    case Service:process_stream(Message, ReqId, ServiceState0,
+                                #{recv_time => State#state.recv_time}) of
         %% Give the service the opportunity to throw out messages it
         %% doesn't care about.
         {ignore, ServiceState} ->

@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_core_pb_bucket_type: Expose Core bucket type functionality to Protocol Buffers
-%%
-%% Copyright (c) 2012 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2013 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -38,7 +37,9 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3]).
+         process/3,
+         process_stream/3,
+         process_stream/4]).
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 
@@ -60,7 +61,10 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket type properties
-process(#rpbgetbuckettypereq{type = T}, State) ->
+process(Req=#rpbgetbuckettypereq{}, State) ->
+    process(Req, State, []).
+
+process(#rpbgetbuckettypereq{type = T}, State, _Options) ->
     case riak_core_bucket_type:get(T) of
         undefined ->
             {error, {format, "Invalid bucket type: ~p", [T]}, State};
@@ -70,7 +74,7 @@ process(#rpbgetbuckettypereq{type = T}, State) ->
     end;
 
 %% Set bucket type properties
-process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
+process(#rpbsetbuckettypereq{type = T, props = PbProps}, State, _Options) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     case riak_core_bucket_type:update(T, Props) of
         ok ->
@@ -80,5 +84,8 @@ process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
     end.
 
 process_stream(_, _, State) ->
+    {ignore, State}.
+
+process_stream(_, _, State, _) ->
     {ignore, State}.
 

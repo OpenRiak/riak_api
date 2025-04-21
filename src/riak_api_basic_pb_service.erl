@@ -1,8 +1,7 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_api_basic_pb_service: Simple cluster health service
-%%
-%% Copyright (c) 2012 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2013 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -48,7 +47,9 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3]).
+         process/3,
+         process_stream/3,
+         process_stream/4]).
 
 %% @doc init/0 callback. Returns the service internal start
 %% state. This service has no state.
@@ -64,17 +65,23 @@ decode(Code, Bin) when Code == 1; Code == 7 ->
 encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
-%% @doc process/2 callback. Handles an incoming request message.
-process(rpbpingreq, State) ->
+%% @doc process/2,3 callback. Handles an incoming request message.
+process(Req, State) ->
+    process(Req, State, []).
+
+process(rpbpingreq, State, _Options) ->
     {reply, rpbpingresp, State};
-process(rpbgetserverinforeq, State) ->
+process(rpbgetserverinforeq, State, _Options) ->
     {_, Vsn} = init:script_id(),
     Message = #rpbgetserverinforesp{node = riak_pb_codec:to_binary(node()),
                                     server_version = riak_pb_codec:to_binary(Vsn)},
     {reply, Message, State}.
 
-%% @doc process_stream/3 callback. Handles a streaming message
+%% @doc process_stream/3,4 callback. Handles a streaming message
 %% received by the server on behalf of the service. This service
 %% implements no streaming responses, so all messages are ignored.
 process_stream(_,_,State) ->
+    {ignore, State}.
+
+process_stream(_,_,State,_) ->
     {ignore, State}.

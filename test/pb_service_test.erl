@@ -1,6 +1,7 @@
 %% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -31,7 +32,9 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3]).
+         process/3,
+         process_stream/3,
+         process_stream/4]).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -67,9 +70,12 @@ encode(ok) ->
 encode(_) ->
     error.
 
-process(bigreq, State) ->
+process(Req, State) ->
+    process(Req, State, []).
+
+process(bigreq, State, _Options) ->
     {reply, foo, State};
-process(stream, State) ->
+process(stream, State, _Options) ->
     Server = self(),
     Ref = make_ref(),
     spawn_link(fun() ->
@@ -79,7 +85,7 @@ process(stream, State) ->
                        Server ! {Ref, done}
                end),
     {reply, {stream, Ref}, State};
-process(stream_multi, State) ->
+process(stream_multi, State, _Options) ->
     Server = self(),
     Ref = make_ref(),
     spawn_link(fun() ->
@@ -87,22 +93,25 @@ process(stream_multi, State) ->
                        Server ! {Ref, multi_done}
                end),
     {reply, {stream, Ref}, State};
-process(internalerror, State) ->
+process(internalerror, State, _Options) ->
     {error, "BOOM", State};
-process(badresponse, State) ->
+process(badresponse, State, _Options) ->
     {reply, badresponse, State};
-process(dummyreq, State) ->
+process(dummyreq, State, _Options) ->
     {reply, ok, State}.
 
-process_stream({Ref,multi_done}, Ref, State) ->
+process_stream(Req, Ref, State) ->
+    process_stream(Req, Ref, State, []).
+
+process_stream({Ref,multi_done}, Ref, State, _Options) ->
     {done, [foo, bar], State};
-process_stream({Ref,done}, Ref, State) ->
+process_stream({Ref,done}, Ref, State, _Options) ->
     {done, State};
-process_stream({Ref, multi}, Ref, State) ->
+process_stream({Ref, multi}, Ref, State, _Options) ->
     {reply, [foo, foo], State};
-process_stream({Ref,Msg}, Ref, State) ->
+process_stream({Ref,Msg}, Ref, State, _Options) ->
     {reply, Msg, State};
-process_stream(_, _, State) ->
+process_stream(_, _, State, _Options) ->
     {ignore, State}.
 
 
@@ -111,7 +120,7 @@ process_stream(_, _, State) ->
 %% ===================================================================
 setup() ->
     application:load(riak_api),
-    LogFile = filename:join([code:priv_dir(riak_api), "pb_service_test.log"]),
+    _LogFile = filename:join([code:priv_dir(riak_api), "pb_service_test.log"]),
 
     error_logger:tty(false),
 
@@ -120,7 +129,7 @@ setup() ->
     ets:insert(riak_capability_ets, {{riak_core, security}, false}),
 
     OldListeners = app_helper:get_env(riak_api, pb, [{"127.0.0.1", 8087}]),
-    application:set_env(riak_api, pb, [{"127.0.0.1", 32767}]),
+    application:set_env(riak_api, pb, [{"127.0.0.1", 10017}]),
 
     {ok, Sup} = riak_api_sup:start_link(),
     unlink(Sup),

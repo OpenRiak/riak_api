@@ -2,7 +2,8 @@
 %%
 %% riak_api_pb_service: Riak Client APIs Protocol Buffers Services
 %%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2014 Basho Technologies, Inc.
+%% Copyright (c) 2025 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -20,7 +21,9 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Encapsulates the behaviour and registration of
+%% @doc Riak Client APIs Protocol Buffers Services.
+%%
+%% Encapsulates the behaviour and registration of
 %% application-specific interfaces exposed over the Protocol Buffers
 %% API. Service modules should implement the behaviour, and the host
 %% applications should register them on startup like so:
@@ -99,6 +102,8 @@
 %%
 %% ```
 %% process(Message, State) ->
+%%     process(Message, State, []).
+%% process(Message, State, Options) ->
 %%     {reply, ReplyMessage, NewState} |
 %%     {reply, {stream, ReqId}, NewState} |
 %%     {error, Error, NewState}.
@@ -107,11 +112,11 @@
 %%     Error = iodata() | {format, term()} | {format, io:format(), [term()]}
 %% '''
 %%
-%% The `process/2' callback is where the work of servicing a client
+%% The `process/2,3' callback is where the work of servicing a client
 %% request is done. The return value of the `decode/2' callback will
 %% be passed as `Message' and the last value of the service state as
 %% `State' (as returned from `init/0' or a previous invocation of
-%% `process/2' or `process_stream/3'). The callback should return
+%% `process/2,3' or `process_stream/3,4'). The callback should return
 %% 3-tuples, any of which include the modified service state as the
 %% last entry. The first form is a simple reply in which a single
 %% message is returned to the client (passing through `encode/1' along
@@ -126,8 +131,13 @@
 %% `format' 3-tuple, the list of terms will be formatted against the
 %% format string before being sent to the client.
 %%
+%% The `Options' parameter can be a map of anything that the service
+%% needs to process the message.
+%%
 %% ```
 %% process_stream(Message, ReqId, State) ->
+%%    process_stream(Message, ReqId, State, []).
+%% process_stream(Message, ReqId, State, Options) ->
 %%     {reply, Reply, NewState} |
 %%     {ignore, NewState} |
 %%     {done, Reply, NewState} |
@@ -139,24 +149,28 @@
 %%     Error = iodata() | {format, term()} | {format, io:format(), [term()]}
 %% '''
 %%
-%% The `process_stream/3' callback is invoked when the socket/server
+%% The `process_stream/3,4' callback is invoked when the socket/server
 %% process receives a message from another Erlang process while in
 %% streaming mode. The passed `ReqId' is the value returned from
-%% `process/2' when streaming mode was started, and is usually used to
+%% `process/2,3' when streaming mode was started, and is usually used to
 %% identify or ignore incoming messages from other processes. Like
-%% `process/2', the state of the service is passed as the last
+%% `process/2,3', the state of the service is passed as the last
 %% argument.
 %%
-%% As with `process/2', the last entry of all return-value tuples
+%% As with `process/2,3', the last entry of all return-value tuples
 %% should be the updated state of the service. Also, similarly to
-%% `process/2', a `reply' tuple will result in sending a normal
+%% `process/2,3', a `reply' tuple will result in sending a normal
 %% message to the client. When `Reply' is a list, this will be
 %% interpreted as sending multiple messages to the client in one pass.
-%% Error tuples have similar semantics to `process/2', but will also
+%% Error tuples have similar semantics to `process/2,3', but will also
 %% cause the service to exit streaming mode. The `ignore' tuple will
 %% cause the server to do nothing. The `done' tuples have the same
 %% semantics as `reply' (including multi-message replies) and `ignore'
 %% but signal a normal end of the streaming operation.
+%%
+%% The `Options' parameter can be a map of anything that the service
+%% needs to process the message.
+%%
 %% @end
 
 -module(riak_api_pb_service).
@@ -195,8 +209,18 @@
     {reply, ReplyMessage :: term(), NewState :: term()} |
     {reply, {stream, ReqId :: term()}, NewState :: term()} |
     {error, Error :: process_error(), NewState :: term()}.
+-callback process(Message :: term(), State :: term(), Options :: map()) ->
+    {reply, ReplyMessage :: term(), NewState :: term()} |
+    {reply, {stream, ReqId :: term()}, NewState :: term()} |
+    {error, Error :: process_error(), NewState :: term()}.
 
 -callback process_stream(Message :: term(), ReqId :: term(), State :: term()) ->
+    {reply, Reply :: [term()] | term(), NewState :: term()} |
+    {ignore, NewState :: term()} |
+    {done, Reply :: [term()] | term(), NewState :: term()} |
+    {done, NewState :: term()} |
+    {error, Error :: process_error(), NewState :: term()}.
+-callback process_stream(Message :: term(), ReqId :: term(), State :: term(), Options :: map()) ->
     {reply, Reply :: [term()] | term(), NewState :: term()} |
     {ignore, NewState :: term()} |
     {done, Reply :: [term()] | term(), NewState :: term()} |
