@@ -34,7 +34,9 @@
          process/2,
          process/3,
          process_stream/3,
-         process_stream/4]).
+         process_stream/4,
+         handle_metrics/2
+        ]).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -114,6 +116,7 @@ process_stream({Ref,Msg}, Ref, State, _Options) ->
 process_stream(_, _, State, _Options) ->
     {ignore, State}.
 
+handle_metrics(_, _) -> ok.
 
 %% ===================================================================
 %% Eunit tests

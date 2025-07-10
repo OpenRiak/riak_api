@@ -402,61 +402,123 @@ decode_buffer(StateName, State=#state{socket=Socket,
 %% and decoded.
 -spec process_message(atom(), term(), term(), #state{}) -> #state{}.
 process_message(Service, Message, ServiceState, ServerState) ->
-    case Service:process(Message, ServiceState,
-                        #{recv_time => ServerState#state.recv_time}) of
-        %% Streaming reply with reference
-        {reply, {stream, ReqId}, NewServiceState} ->
-            update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId,NewServiceState}});
-        %% Normal reply
-        {reply, ReplyMessage, NewServiceState} ->
-            ServerState1 = send_encoded_message_or_error(Service, ReplyMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServiceState, ServerState1);
-        %% Recoverable error
-        {error, ErrorMessage, NewServiceState} ->
-            ServerState1 = send_error(ErrorMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServiceState, ServerState1);
-        %% Result is broken
-        Other ->
-            send_error("Unknown PB service response: ~p", [Other], ServerState)
-    end.
+    StartTime = ServerState#state.recv_time,
+    Result = case Service:process(Message, ServiceState,
+                                        #{recv_time => StartTime}) of
+                                        %% Streaming reply with reference
+                                        {reply, {stream, ReqId}, NewServiceState} ->
+                                            NewServerState = ServerState#state{req={Service,ReqId,NewServiceState}},
+                                            {ok, Service, NewServiceState, NewServerState};
+                                        %% Normal reply
+                                        {reply, ReplyMessage, NewServiceState} ->
+                                            ServerState1 = send_encoded_message_or_error(Service, ReplyMessage, ServerState),
+                                            {ok, Service, NewServiceState, ServerState1};
+                                        %% Recoverable error
+                                        {error, ErrorMessage, NewServiceState} ->
+                                            ServerState1 = send_error(ErrorMessage, ServerState),
+                                            ServerState2 = update_service_state(Service, NewServiceState, ServiceState, ServerState1),
+                                            {error, ServerState2};
+                                        %% Result is broken
+                                        Other ->
+                                            ServerState1 = send_error("Unknown PB service response: ~p", [Other], ServerState),
+                                            {error, ServerState1}
+                                    end,
 
+    EndTime = erlang:monotonic_time(),
+    Metrics = #{
+        req_start_time => StartTime,
+        req_end_time => EndTime,
+        msg_start_time => StartTime,
+        msg_end_time => EndTime,
+        status => element(1, Result)
+    },
+    handle_metrics(Service, Message, Metrics),
+
+    case Result of
+        {error, NewServerState1} ->
+            NewServerState1;
+        {ok, Svc, NewServiceState1, NewServerState1} ->
+            update_service_state(Svc, NewServiceState1, ServiceState, NewServerState1)
+    end.
+       
 %% @doc Processes a message received from a stream. These are received
 %% on the server process so that we can avoid middlemen, but need to
 %% be translated into responses according to the service producing
 %% them.
 -spec process_stream(module(), term(), term(), term(), #state{}) -> #state{}.
 process_stream(Service, ReqId, Message, ServiceState0, State) ->
-    case Service:process_stream(Message, ReqId, ServiceState0,
+    StartTime = State#state.recv_time,
+    MsgStartTime = erlang:monotonic_time(),
+
+    {IsStreamComplete, Result} = case Service:process_stream(Message, ReqId, ServiceState0,
                                 #{recv_time => State#state.recv_time}) of
         %% Give the service the opportunity to throw out messages it
         %% doesn't care about.
         {ignore, ServiceState} ->
-            update_service_state(Service, ServiceState, ServiceState0, State);
+            {false, {ok, ServiceState, State}};
         %% Sending multiple replies in middle-of-stream
         {reply, Replies, ServiceState} when is_list(Replies) ->
             State1 = send_all(Service, Replies, State),
-            update_service_state(Service, ServiceState, ServiceState0, State1);
+            {false, {ok, ServiceState, State1}};
         %% Regular middle-of-stream messages
         {reply, Reply, ServiceState} ->
             State1 = send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, ServiceState0, State1);
+            {false, {ok, ServiceState, State1}};
         %% Stop the stream with multiple final replies
         {done, Replies, ServiceState} when is_list(Replies) ->
             State1 = send_all(Service, Replies, State),
-            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
+            {true, {ok, ServiceState, State1#state{req=undefined}}};
         %% Stop the stream with a final reply
         {done, Reply, ServiceState} ->
             State1 = send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
+            {true, {ok, ServiceState, State1#state{req=undefined}}};
         %% Stop the stream without sending a client reply
         {done, ServiceState} ->
-            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
+            {true, {ok, ServiceState, State#state{req=undefined}}};
         %% Send the client normal errors
         {error, Reason, ServiceState} ->
             State1 = send_error(Reason, State),
-            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
+            State2 = update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined}),
+            {true, {error, State2}};
         Other ->
-            send_error("Unknown PB service response: ~p", [Other], State)
+            State1 = send_error("Unknown PB service response: ~p", [Other], State),
+            {true, {error, State1}}
+    end,
+
+    ReqEndTime = case IsStreamComplete of
+                    true ->
+                        erlang:monotonic_time();
+                    _ ->
+                        undefined
+                 end,
+    Metrics = #{
+        req_start_time => StartTime,
+        req_end_time => ReqEndTime,
+        msg_start_time => MsgStartTime,
+        msg_end_time => erlang:monotonic_time(),
+        status => element(1, Result)
+    },
+
+    #state{req=Req} = State,
+    handle_metrics(Service, Req, Metrics),
+
+    case Result of
+        {error, NewState} ->
+            NewState;
+        {_, ServiceState1, NewState} ->
+            update_service_state(Service, ServiceState1, ServiceState0, NewState)
+    end.
+
+-spec handle_metrics(module(), term(), map()) -> ok.
+handle_metrics(Service, Message, Metrics) ->
+    try
+        Service:handle_metrics(Message, Metrics),
+        ok
+    catch
+        Class:Reason ->
+            ?LOG_WARNING("Error calling handle_metrics for service ~p: ~p:~p",
+                        [Service, Class, Reason]),
+            ok
     end.
 
 %% @doc Updates the given service state and puts it in the server's state.

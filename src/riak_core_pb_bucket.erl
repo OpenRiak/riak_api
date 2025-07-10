@@ -49,7 +49,9 @@
          process/2,
          process/3,
          process_stream/3,
-         process_stream/4]).
+         process_stream/4,
+         handle_metrics/2
+        ]).
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 
@@ -114,6 +116,9 @@ process_stream(_, _, State) ->
 
 process_stream(_, _, State, _) ->
     {ignore, State}.
+
+handle_metrics(_Message, _Metrics) ->
+    ok.
 
 maybe_create_bucket_type(<<"default">>, Bucket) ->
     Bucket;

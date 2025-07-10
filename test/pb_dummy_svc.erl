@@ -27,7 +27,9 @@
          process/2,
          process/3,
          process_stream/3,
-         process_stream/4]).
+         process_stream/4,
+         handle_metrics/2
+        ]).
 
 init() ->
     undefined.
@@ -54,3 +56,4 @@ process_stream(_, _, State) ->
 process_stream(_, _, State, _) ->
     {ignore, State}.
 
+handle_metrics(_, _) -> ok.

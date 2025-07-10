@@ -227,6 +227,16 @@
     {done, NewState :: term()} |
     {error, Error :: process_error(), NewState :: term()}.
 
+-type metrics_info() :: #{
+    req_start_time := integer(),
+    req_end_time := integer() | undefined,
+    msg_start_time := integer(),
+    msg_end_time := integer(),
+    status := ok | error
+}.
+
+-callback handle_metrics(Message :: term(), Metrics :: metrics_info()) -> ok.
+
 %% @doc Registers a number of services at once.
 %% @see register/3
 -spec register([registration()]) -> ok | {error, Reason::term()}.
