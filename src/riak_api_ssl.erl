@@ -64,16 +64,7 @@ options() ->
     [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
 
 
--ifdef(deprecated_22).
 ciphers() -> [].
-    % ciphers not support as an option when starting a SSL handshake in OTP 22
--else.
-ciphers() ->
-    {Ciphers, _} =
-        riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
-    [{ciphers, Ciphers}].
--endif.
-
 
 %% @doc Validator function for SSL negotiation.
 %%

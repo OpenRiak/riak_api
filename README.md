@@ -1,6 +1,6 @@
 # `riak_api` - Riak Client APIs
 
-![Riak API OpenRiak Status](https://github.com/OpenRiak/riak_api/actions/workflows/erlang.yml/badge.svg?branch=openriak-3.4)
+![Riak API OpenRiak Status](https://github.com/OpenRiak/riak_api/actions/workflows/erlang.yml/badge.svg?branch=openriak-4.0)
 
 This OTP application encapsulates services for presenting Riak's
 public-facing interfaces. Currently this means a generic interface for

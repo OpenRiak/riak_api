@@ -33,11 +33,20 @@
 -include_lib("riak_pb/include/riak_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
--compile({nowarn_deprecated_function, 
-            [{gen_fsm, start_link, 3},
+-compile(
+    [
+        {
+            nowarn_deprecated_function, 
+            [
+                {gen_fsm, start_link, 3},
                 {gen_fsm, start, 3},
                 {gen_fsm, sync_send_event, 3},
-                {gen_fsm, send_all_state_event, 2}]}).
+                {gen_fsm, send_all_state_event, 2}
+            ]
+        },
+    nowarn_deprecated_callback
+    ]
+).
 
 -behaviour(gen_fsm).
 
@@ -69,13 +78,8 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--ifdef(deprecated_21).
 ssl_handshake(Socket, SslOpts) ->
     ssl:handshake(Socket, SslOpts).
--else.
-ssl_handshake(Socket, SslOpts) ->
-    ssl:ssl_accept(Socket, SslOpts).
--endif.
 
 %% ===================================================================
 %% Public API
