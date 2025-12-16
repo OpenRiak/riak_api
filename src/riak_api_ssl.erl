@@ -63,8 +63,10 @@ options() ->
     %% verify_fun for them.
     [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
 
-
-ciphers() -> [].
+ciphers() ->
+    {Ciphers, _} =
+        riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
+    [{ciphers, Ciphers}].
 
 %% @doc Validator function for SSL negotiation.
 %%
