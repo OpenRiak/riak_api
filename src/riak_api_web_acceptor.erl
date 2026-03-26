@@ -1,4 +1,4 @@
-%% ------------------------------------------------------------------- 
+%% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2026 Martin Sumner
 %%
@@ -37,22 +37,22 @@
 -define(CONTINUE_RESPONSE, <<"HTTP 1.1 100 Continue">>).
 
 -type response_code() ::
-    400 |
-    413 |
-    431 |
-    200.
+    400
+    | 413
+    | 431
+    | 200.
 
 -type method() ::
     'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS' | 'TRACE'.
 
 -type http_version() ::
-    {1, 0} | { 1, 1}.
+    {1, 0} | {1, 1}.
 
 -type halt_response() ::
     {
         halt,
         response_code(),
-        riak_api_web_headers:headers()|none,
+        riak_api_web_headers:headers() | none,
         binary(),
         list()
     }.
@@ -67,18 +67,18 @@
     }.
 -type good_result() ::
     {
-          finish,
-          boolean(),
-          response_code(),
-          riak_api_web_headers:headers(),
-          {stream, stream_fun()} | binary(),
-          {module(), any()},
-          riak_api_web_socket:socket(),
-          binary(),
-          pos_integer()  
+        finish,
+        boolean(),
+        response_code(),
+        riak_api_web_headers:headers(),
+        {stream, stream_fun()} | binary(),
+        {module(), any()},
+        riak_api_web_socket:socket(),
+        binary(),
+        pos_integer()
     }.
 
--type stream_fun() :: fun(() -> {ok, binary()}|done).
+-type stream_fun() :: fun(() -> {ok, binary()} | done).
 
 -export_type([halt_response/0, method/0]).
 
@@ -172,12 +172,12 @@ handle_request(Socket, InitBuffer) ->
                     ModCtx3,
                     InitReqBdy
                 ),
-            Keepalive  = 
+            Keepalive =
                 request_prefers_keepalive(Version, ReqHeaders) andalso
-                KeepAliveOK,
+                    KeepAliveOK,
             MergedRspHeaders =
                 riak_api_web_headers:enter_from_list(
-                    RspHeaders, 
+                    RspHeaders,
                     default_response_headers(Keepalive)
                 ),
             {
@@ -202,7 +202,6 @@ handle_request(Socket, InitBuffer) ->
 %%% Manage Version on Process dictionary
 %%%============================================================================
 
-
 -define(VERSION_KEY, {?MODULE, http_version}).
 
 set_version({1, 0}) ->
@@ -221,7 +220,6 @@ get_version() ->
 reset_version() ->
     put(?VERSION_KEY, undefined).
 
-
 %%%============================================================================
 %%% Internal request handling functions
 %%%============================================================================
@@ -232,12 +230,12 @@ bad_request(Error, Subs) ->
 
 -spec split_path(
     iodata()
-) -> 
+) ->
     {
         ok,
         {unicode:chardata(), [{unicode:chardata(), unicode:chardata() | true}]}
-    } |
-    halt_response().
+    }
+    | halt_response().
 split_path(URIPath) ->
     case uri_string:normalize(URIPath, [return_map]) of
         URIMap when is_map(URIMap) ->
@@ -250,7 +248,7 @@ split_path(URIPath) ->
                         <<"Query parameters not parsed ~w  - ~0p">>,
                         [QTerm, QReason]
                     )
-                end;
+            end;
         {error, NTerm, NReason} ->
             bad_request(
                 <<"Path cannot be normalized ~w  - ~0p">>,
@@ -262,8 +260,8 @@ split_path(URIPath) ->
     riak_api_web_socket:socket(),
     binary(),
     non_neg_integer(),
-    pos_integer()|undefined
-) -> 
+    pos_integer() | undefined
+) ->
     binary().
 extend_buffer(Socket, Buffer, Needed, Timeout) ->
     case riak_api_web_socket:recv(Socket, Needed, get_timeout(Timeout)) of
@@ -281,7 +279,7 @@ extend_buffer(Socket, Buffer, Needed, Timeout) ->
 
 -spec extend_buffer_fun(
     riak_api_web_socket:socket()
-) -> 
+) ->
     riak_api_web_body:buffer_fun().
 extend_buffer_fun(Socket) ->
     fun(Buffer, Needed, Timeout) ->
@@ -290,8 +288,8 @@ extend_buffer_fun(Socket) ->
 
 -spec expect_body(
     riak_api_web_headers:headers()
-) -> 
-    {ok, {non_neg_integer() | chunked , boolean()}} | halt_response().
+) ->
+    {ok, {non_neg_integer() | chunked, boolean()}} | halt_response().
 expect_body(Headers) ->
     ContentLengthH =
         riak_api_web_headers:get_unique_value('Content-Length', Headers),
@@ -321,7 +319,7 @@ expect_body(Headers) ->
                         )
                 end
             catch
-                _ : _ ->
+                _:_ ->
                     bad_request(<<"Non-integer content length ~0p">>, [ValBin])
             end;
         {undefined, <<"chunked">>} ->
@@ -344,9 +342,9 @@ generate_error_body(ErrorText, Subs) ->
 -spec get_request_line(
     riak_api_web_socket:socket(),
     binary()
-) -> 
-    {ok, {method(), binary(), http_version(), binary()}} |
-    halt_response().
+) ->
+    {ok, {method(), binary(), http_version(), binary()}}
+    | halt_response().
 get_request_line(Socket, Buffer) ->
     case erlang:decode_packet(http_bin, Buffer, []) of
         {more, _} ->
@@ -354,19 +352,21 @@ get_request_line(Socket, Buffer) ->
                 Socket,
                 extend_buffer(Socket, Buffer, 0, undefined)
             );
-        {ok, {http_request, Method, {abs_path, Path}, Version}, Rest}
-                when is_binary(Path) ->
+        {ok, {http_request, Method, {abs_path, Path}, Version}, Rest} when
+            is_binary(Path)
+        ->
             case Version of
                 SV when SV == {1, 0}; SV == {1, 1} ->
                     case Method of
-                        SM when 
+                        SM when
                             SM == 'GET';
-                            SM == 'HEAD'; 
+                            SM == 'HEAD';
                             SM == 'POST';
                             SM == 'PUT';
                             SM == 'DELETE';
                             SM == 'OPTIONS';
-                            SM == 'TRACE' ->
+                            SM == 'TRACE'
+                        ->
                             {ok, {SM, Path, SV, Rest}};
                         _USM ->
                             {halt, 405, none, <<>>, []}
@@ -388,9 +388,9 @@ get_request_line(Socket, Buffer) ->
     binary(),
     riak_api_web_socket:socket(),
     {pos_integer(), pos_integer()}
-) -> 
-    {ok, riak_api_web_headers:headers(), binary()} |
-    riak_api_web_acceptor:halt_response().
+) ->
+    {ok, riak_api_web_headers:headers(), binary()}
+    | riak_api_web_acceptor:halt_response().
 get_request_headers(Buffer, Socket, {MaxCount, MaxSize}) ->
     riak_api_web_headers:parse_request_block(
         Buffer,
@@ -403,7 +403,7 @@ get_request_headers(Buffer, Socket, {MaxCount, MaxSize}) ->
 -spec request_prefers_keepalive(
     http_version(),
     riak_api_web_headers:headers()
-) -> 
+) ->
     boolean().
 request_prefers_keepalive({1, 0}, ReqHeaders) ->
     %% https://www.rfc-editor.org/rfc/rfc7230#section-6.1
@@ -433,9 +433,9 @@ request_prefers_keepalive({1, 1}, ReqHeaders) ->
     end.
 
 -spec get_timeout(
-    undefined|infinity|non_neg_integer()
-) -> 
-    non_neg_integer()|infinity.
+    undefined | infinity | non_neg_integer()
+) ->
+    non_neg_integer() | infinity.
 get_timeout(undefined) ->
     ?RECEIVE_TIMEOUT;
 get_timeout(infinity) ->
@@ -449,7 +449,7 @@ get_timeout(Timeout) when is_integer(Timeout), Timeout >= 0 ->
 
 -spec handle_response(
     good_result() | halt_result()
-) -> 
+) ->
     {boolean(), binary()} | close.
 handle_response(
     {
@@ -467,7 +467,13 @@ handle_response(
     RequestCompleteTime = os:system_time(microsecond),
     stream_response(RspCode, RspHeaders, StreamFun, Socket),
     ResponseCompleteTime = os:system_time(microsecond),
-    CallbackMod:record_request(Context, StartTime, RequestCompleteTime, ResponseCompleteTime, stream_complete),
+    CallbackMod:record_request(
+        Context,
+        StartTime,
+        RequestCompleteTime,
+        ResponseCompleteTime,
+        stream_complete
+    ),
     {Keepalive, BufferIn};
 handle_response(
     {
@@ -485,12 +491,18 @@ handle_response(
     RequestCompleteTime = os:system_time(microsecond),
     send_response(RspCode, RspHeaders, RspBody, Socket),
     ResponseCompleteTime = os:system_time(microsecond),
-    CallbackMod:record_request(Context, StartTime, RequestCompleteTime, ResponseCompleteTime, send_complete),
+    CallbackMod:record_request(
+        Context,
+        StartTime,
+        RequestCompleteTime,
+        ResponseCompleteTime,
+        send_complete
+    ),
     {Keepalive, BufferIn};
 handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->
     MergedRspHeaders =
         riak_api_web_headers:enter_from_list(
-            RspHeaders, 
+            RspHeaders,
             default_response_headers(false)
         ),
     send_response(RspCode, MergedRspHeaders, RspBody, Socket),
@@ -499,7 +511,7 @@ handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->
 -spec send_continue(
     riak_api_web_socket:socket(),
     riak_api_web_headers:headers()
-) -> 
+) ->
     ok | {error, term()}.
 send_continue(Socket, ReqHeaders) ->
     case riak_api_web_headers:lookup(<<"expect">>, ReqHeaders, true) of
@@ -514,7 +526,7 @@ send_continue(Socket, ReqHeaders) ->
     riak_api_web_headers:headers(),
     stream_fun(),
     riak_api_web_socket:socket()
-) -> 
+) ->
     ok.
 stream_response(_RspCode, _RspHeaders, _StreamFun, _Socket) ->
     ok.
@@ -524,7 +536,7 @@ stream_response(_RspCode, _RspHeaders, _StreamFun, _Socket) ->
     riak_api_web_headers:headers(),
     binary(),
     riak_api_web_socket:socket()
-) -> 
+) ->
     ok.
 send_response(_RspCode, _RspHeaders, _RspBody, _Socket) ->
     _Version = get_version(),

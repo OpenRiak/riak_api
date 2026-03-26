@@ -1,4 +1,4 @@
-%% ------------------------------------------------------------------- 
+%% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2007 Mochi Media, Inc
 %% Copyright (c) 2026 Martin Sumner
@@ -19,14 +19,14 @@
 %%
 %% -------------------------------------------------------------------
 %% @doc Case preserving (but case insensitive) HTTP Header dictionary.
-%% 
+%%
 %% The headers are stored in a map, and the header keys will be an atom if
 %% in the standard list of headers decoded by Erlang/OTP - and otherwise a
 %% binary().
-%% 
+%%
 %% The values will always be binaries, comma(-and-space)-separated for values
 %% with multiple items
-%% 
+%%
 %% The module was initially a refactoring of the mochiweb_headers module.
 
 -module(riak_api_web_headers).
@@ -37,64 +37,74 @@
 -export([output_response_block/1, parse_request_block/3]).
 
 -define(KV_SEPARATOR, <<": ">>).
--define(V_SEPARATOR,  <<", ">>).
+-define(V_SEPARATOR, <<", ">>).
 -define(L_SEPARATOR, <<"\r\n">>).
 
--record(headers, 
-    {
-        type = request :: request|response,
-            %% response headers do not support the lookup of non-standard
-            %% header keys - and hence avoid the need to lower case those
-            %% keys for comparison
-        header_map = maps:new() :: header_map()
-    }
-).
+-record(headers, {
+    type = request :: request | response,
+    %% response headers do not support the lookup of non-standard
+    %% header keys - and hence avoid the need to lower case those
+    %% keys for comparison
+    header_map = maps:new() :: header_map()
+}).
 
 -type standard_header_key() ::
-    'Cache-Control' |
-    'Connection' |
-    'Date' |
-    'Pragma' |
-    'Transfer-Encoding' |
-    'Upgrade' |
-    'Via' |
-    'Accept' |
-    'Accept-Charset' | 'Accept-Encoding' | 'Accept-Language' | 
-    'Authorization' |
-        'Proxy-Authorization' | 'Proxy-Authenticate' | 'Www-Authenticate' |
-    'From' |
-    'Host' | 
-    'If-Modified-Since' | 'If-Match' | 'If-None-Match' |
-        'If-Range' | 'If-Unmodified-Since' |
-    'Max-Forwards' |
-    'Range' | 
-    'Referer' | 
-    'User-Agent' | 
-    'Age' |
-    'Location' | 
-    'Public' | 
-    'Retry-After' |
-    'Server' |
-    'Vary' | 
-    'Warning' |  
-    'Allow' |
-    'Content-Base' | 'Content-Encoding' | 'Content-Language' |
-        'Content-Length' | 'Content-Location' | 'Content-Md5' | 
-        'Content-Range' | 'Content-Type' |
-    'Etag' |
-    'Expires' |
-    'Last-Modified' |
-    'Accept-Ranges' |
-    'Set-Cookie' |
-    'Set-Cookie2' |
-    'X-Forwarded-For' |
-    'Cookie' |
-    'Keep-Alive' |
-    'Proxy-Connection'.
-    % This list is controlled by Erlang/OTP - i.e. there may be further atoms
-    % added in the future, but it has been stable since OTP 13.
+    'Cache-Control'
+    | 'Connection'
+    | 'Date'
+    | 'Pragma'
+    | 'Transfer-Encoding'
+    | 'Upgrade'
+    | 'Via'
+    | 'Accept'
+    | 'Accept-Charset'
+    | 'Accept-Encoding'
+    | 'Accept-Language'
+    | 'Authorization'
+    | 'Proxy-Authorization'
+    | 'Proxy-Authenticate'
+    | 'Www-Authenticate'
+    | 'From'
+    | 'Host'
+    | 'If-Modified-Since'
+    | 'If-Match'
+    | 'If-None-Match'
+    | 'If-Range'
+    | 'If-Unmodified-Since'
+    | 'Max-Forwards'
+    | 'Range'
+    | 'Referer'
+    | 'User-Agent'
+    | 'Age'
+    | 'Location'
+    | 'Public'
+    | 'Retry-After'
+    | 'Server'
+    | 'Vary'
+    | 'Warning'
+    | 'Allow'
+    | 'Content-Base'
+    | 'Content-Encoding'
+    | 'Content-Language'
+    | 'Content-Length'
+    | 'Content-Location'
+    | 'Content-Md5'
+    | 'Content-Range'
+    | 'Content-Type'
+    | 'Etag'
+    | 'Expires'
+    | 'Last-Modified'
+    | 'Accept-Ranges'
+    | 'Set-Cookie'
+    | 'Set-Cookie2'
+    | 'X-Forwarded-For'
+    | 'Cookie'
+    | 'Keep-Alive'
+    | 'Proxy-Connection'.
+% This list is controlled by Erlang/OTP - i.e. there may be further atoms
+% added in the future, but it has been stable since OTP 13.
 -type binary_header_key() :: unicode:chardata() | binary().
--type header_key() :: standard_header_key()|binary_header_key().
+-type header_key() :: standard_header_key() | binary_header_key().
 -type header_value() :: {binary(), list(binary())}.
 -type header_map() :: #{header_key() => header_value()}.
 -type header_list() :: [{header_key(), binary()}].
@@ -107,7 +117,7 @@
 %%% API
 %%%============================================================================
 
-%% @doc 
+%% @doc
 %% Construct a headers() from the given list of headers received in a
 %% request.
 -spec make([{header_key(), binary()}]) -> headers().
@@ -120,8 +130,7 @@ make(HeaderList) when is_list(HeaderList) ->
 %% With response headers it is not possible to lookup non-standard header keys,
 %% An the value may be a list if elements - that will be joined into a single
 %% comma-separated value before creating the response header.
--spec make_rsp_header([{header_key(), list(binary())|binary()}]
-) -> 
+-spec make_rsp_header([{header_key(), list(binary()) | binary()}]) ->
     headers().
 make_rsp_header(HeaderList) ->
     HeaderMap = from_list(HeaderList, false),
@@ -131,11 +140,11 @@ make_rsp_header(HeaderList) ->
 %% Insert pairs into the headers, replace any values for existing keys.
 %% Specifically used in response headers when setting ranges into existing
 %% headers.
--spec enter_from_list([{header_key(), binary()}], headers()
-) -> 
+-spec enter_from_list([{header_key(), binary()}], headers()) ->
     headers().
-enter_from_list(HeaderList, #headers{type = T, header_map = HM})
-        when T == response ->
+enter_from_list(HeaderList, #headers{type = T, header_map = HM}) when
+    T == response
+->
     #headers{
         type = response,
         header_map = maps:merge(HM, from_list(HeaderList, false))
@@ -143,11 +152,11 @@ enter_from_list(HeaderList, #headers{type = T, header_map = HM})
 
 %% @doc
 %% Insert pairs into response headers for keys that do not already exist.
--spec default_from_list([{header_key(), binary()}], headers()
-) -> 
+-spec default_from_list([{header_key(), binary()}], headers()) ->
     headers().
-default_from_list(HeaderList, #headers{type = T, header_map = HM})
-        when T == response ->
+default_from_list(HeaderList, #headers{type = T, header_map = HM}) when
+    T == response
+->
     #headers{
         type = response,
         header_map = maps:merge(from_list(HeaderList, false), HM)
@@ -155,11 +164,11 @@ default_from_list(HeaderList, #headers{type = T, header_map = HM})
 
 %% @doc
 %% Add a single value for a single key to the response map
--spec enter(header_key(), binary(), headers()
-) ->
+-spec enter(header_key(), binary(), headers()) ->
     headers().
-enter(HeaderKey, Value, #headers{type = T, header_map = HM})
-        when T == response ->
+enter(HeaderKey, Value, #headers{type = T, header_map = HM}) when
+    T == response
+->
     {HK, HV} = normalize_header({HeaderKey, Value}, false),
     #headers{
         type = response,
@@ -172,8 +181,7 @@ enter(HeaderKey, Value, #headers{type = T, header_map = HM})
 %% For non-standard (binary) keys use lookup/2.
 %% If the values was a comma-separated list, or multiple headers have been
 %% folded together - then a list rather than a single value is returned.
--spec get_value(standard_header_key(), headers()
-) -> 
+-spec get_value(standard_header_key(), headers()) ->
     unicode:chardata() | list(unicode:chardata()) | undefined.
 get_value(K, H) when is_atom(K) ->
     case maps:get(K, H#headers.header_map, undefined) of
@@ -189,8 +197,7 @@ get_value(K, H) when is_atom(K) ->
 %% If multiple values may be provided for a field, but it is illegal
 %% for those values to differ (e.g. in the case of content-length), only return
 %% a value, if there is only one unique value.
--spec get_unique_value(standard_header_key(), headers()
-) -> 
+-spec get_unique_value(standard_header_key(), headers()) ->
     unicode:chardata() | undefined | {error, multiple_values}.
 get_unique_value(K, H) ->
     case maps:get(K, H#headers.header_map, undefined) of
@@ -221,9 +228,8 @@ parse_primary_header_value(HeaderValue) ->
 %% @doc
 %% Fetch the {original key, values} for a binary (non-standard) header key.
 %% There is a boolean flag to indicate if the key has already been subject to
-%% casefold. 
--spec lookup(binary_header_key(), headers(), boolean()
-) -> 
+%% casefold.
+-spec lookup(binary_header_key(), headers(), boolean()) ->
     {binary(), list(unicode:chardata())} | undefined.
 lookup(CaseFoldedKey, H, true) when is_binary(CaseFoldedKey) ->
     maps:get(CaseFoldedKey, H#headers.header_map, undefined);
@@ -234,8 +240,7 @@ lookup(RawKey, Headers, false) when is_binary(RawKey) ->
 %% Fetch a list of non-standard headers with a given prefix.  The list is a
 %% list of {K, [V]} where K is the remainder of the original key once the
 %% original prefix has been stripped
--spec prefix_fold(binary_header_key(), headers(), boolean()
-) -> 
+-spec prefix_fold(binary_header_key(), headers(), boolean()) ->
     list({unicode:chardata(), list(unicode:chardata())}).
 prefix_fold(CaseFoldPrefix, Headers, true) when is_binary(CaseFoldPrefix) ->
     Keys = maps:keys(Headers#headers.header_map),
@@ -296,14 +301,14 @@ parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}, {HeaderAcc, C}) ->
                 Rest,
                 BufferFun,
                 {MaxCount, MaxSize},
-                {[{Key, Value}|HeaderAcc], C + 1}
+                {[{Key, Value} | HeaderAcc], C + 1}
             );
         {ok, {http_header, _, _Key, OrigKey, Value}, Rest} ->
             parse_request_block(
                 Rest,
                 BufferFun,
                 {MaxCount, MaxSize},
-                {[{OrigKey, Value}|HeaderAcc], C + 1}
+                {[{OrigKey, Value} | HeaderAcc], C + 1}
             );
         {ok, http_eoh, Rest} ->
             {ok, make(HeaderAcc), Rest};
@@ -346,18 +351,17 @@ join_values(VL) ->
     list(header_value()).
 filter_headers([], _Prefix, _PL, _HMap, Acc) ->
     Acc;
-filter_headers([Key|RestKeys], Prefix, PL, HMap, Acc) ->
+filter_headers([Key | RestKeys], Prefix, PL, HMap, Acc) ->
     case Key of
-        <<Prefix:PL/binary, _/binary>> ->        
+        <<Prefix:PL/binary, _/binary>> ->
             {<<_Ignore:PL/binary, Suffix/binary>>, Values} =
                 maps:get(Key, HMap),
-            filter_headers(RestKeys, Prefix, PL, HMap, [{Suffix, Values}|Acc]);
+            filter_headers(RestKeys, Prefix, PL, HMap, [{Suffix, Values} | Acc]);
         _ ->
             filter_headers(RestKeys, Prefix, PL, HMap, Acc)
     end.
 
--spec from_list([{header_key(), binary()|list(binary())}], boolean()
-) -> 
+-spec from_list([{header_key(), binary() | list(binary())}], boolean()) ->
     header_map().
 from_list(HeaderList, IsReqHeader) ->
     lists:foldl(
@@ -375,8 +379,8 @@ from_list(HeaderList, IsReqHeader) ->
     ).
 
 -spec normalize_header(
-    {header_key(), binary()|list(binary())}, boolean()
-) -> 
+    {header_key(), binary() | list(binary())}, boolean()
+) ->
     {header_key(), header_value()}.
 normalize_header({KAtom, Value}, _) when is_atom(KAtom) ->
     {KAtom, {atom_to_binary(KAtom), normalize_value(Value)}};
@@ -385,15 +389,15 @@ normalize_header({KBin, Value}, true) when is_binary(KBin) ->
 normalize_header({KBin, Value}, false) when is_binary(KBin) ->
     {KBin, {KBin, normalize_value(Value)}}.
 
--spec normalize_key(standard_header_key()) -> standard_header_key();
+-spec normalize_key
+    (standard_header_key()) -> standard_header_key();
     (binary_header_key()) -> binary_header_key().
 normalize_key(KAtom) when is_atom(KAtom) ->
     KAtom;
 normalize_key(KBin) when is_binary(KBin) ->
     string:casefold(KBin).
 
--spec normalize_value(binary()|list(binary())
-) -> 
+-spec normalize_value(binary() | list(binary())) ->
     list(binary()).
 normalize_value(MultipleValues) when is_list(MultipleValues) ->
     lists:filter(fun is_binary/1, MultipleValues);
@@ -465,8 +469,7 @@ parse_block_tester(RequestHeader1, RequestHeader2) ->
     ?assertMatch(
         <<"1024">>,
         get_unique_value('Content-Length', Headers)
-    )
-    .
+    ).
 
 riak_metadata_test() ->
     RequestHeader1 =
@@ -523,8 +526,10 @@ response_header_test() ->
             {'Server', <<"Riak Web API">>},
             {'Content-Length', <<"1024">>},
             {'Etag', <<"sometag">>},
-            {<<"X-Riak-Index-field1_bin">>, [<<"NAME1|DOB1">>, <<"NAME2|DOB1">>]},
-            {<<"X-Riak-Index-field1_bin">>,  <<"NAME3|DOB1 ">>},
+            {<<"X-Riak-Index-field1_bin">>, [
+                <<"NAME1|DOB1">>, <<"NAME2|DOB1">>
+            ]},
+            {<<"X-Riak-Index-field1_bin">>, <<"NAME3|DOB1 ">>},
             {<<"X-Riak-Index-field2_bin">>, <<"POSTCODE1|DOB1">>}
         ],
     RespHeaders1 = make_rsp_header(InitHeaders),
@@ -551,7 +556,6 @@ response_header_test() ->
             "X-Riak-Index-field1_bin: NAME3|DOB1, NAME1|DOB1, NAME2|DOB1\r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
         >>,
-    ?assertMatch(ExpectedResponse, Response)
-    .
+    ?assertMatch(ExpectedResponse, Response).
 
 -endif.

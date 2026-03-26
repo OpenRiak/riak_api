@@ -1,4 +1,4 @@
-%% ------------------------------------------------------------------- 
+%% -------------------------------------------------------------------
 %%
 %% Copyright (c) 2007 Mochi Media, Inc
 %% Copyright (c) 2026 Martin Sumner
@@ -19,26 +19,26 @@
 %%
 %% -------------------------------------------------------------------
 %% @doc Socket and acceptor pool management for web requests
-%% 
+%%
 %% Socket manager intended to abstract away from choice of SSL, and also
 %% maintain a pool of accept processes that are ready to accept new connection
 %% requests
-%% 
+%%
 %% Each acceptor is an `riak_api_web_acceptor` - an as each acceptor accepts
 %% a connection, it will prompt this socket server to launch a new acceptor.
 %% When a linked acceptor closes (along with the connection), the close message
 %% is handled and the closed acceptor is removed from the pool.
-%% 
+%%
 %% The intention is that there should always be at least the pool size of
 %% acceptors waiting for a connection - unless the max size is reached, and no
 %% new acceptors will be started.  This means that concurrently no more
 %% connections can be handled concurrently than the max pool size.
-%% 
+%%
 %% The module was initially based on the:
 %%  - mochiweb_socket_server
 %%  - mochiweb_socket
 %%  - mochiweb_acceptor
-%% 
+%%
 %% Patterns used in these modules have been compared with the Elli web server
 %% for validation - https://github.com/elli-lib/elli.
 
@@ -81,65 +81,63 @@
 -define(POOL_SIZE_DEFAULT, 16).
 -define(POOL_SIZE_MAX_DEFAULT, 2048).
 
--record(socket_state, 
-    {
-        port :: inet:port_number(),
-        listener :: socket(),
-        pool_size = ?POOL_SIZE_DEFAULT :: pos_integer(),
-        max_pool_size = ?POOL_SIZE_MAX_DEFAULT :: pos_integer(),
-        acceptor_pool = sets:new([{version, 2}]) :: sets:set()
-    }
-).
+-record(socket_state, {
+    port :: inet:port_number(),
+    listener :: socket(),
+    pool_size = ?POOL_SIZE_DEFAULT :: pos_integer(),
+    max_pool_size = ?POOL_SIZE_MAX_DEFAULT :: pos_integer(),
+    acceptor_pool = sets:new([{version, 2}]) :: sets:set()
+}).
 
 -type socket_option() ::
-    {ip, inet:ip_address()} |
-    binary |
-    {reuseaddr, boolean()} |
-        %% Assumed necessary to allow for rapid restart of supervised
-        %% process - e.g. allow for next process to listen on socket even
-        %% when the previous process has not completed the close
-    {packet, raw} |
-    {active, boolean()}
-        %% After a connection is accepted the socket is manually read to be
-        %% decoded
-    .
+    {ip, inet:ip_address()}
+    | binary
+    | {reuseaddr, boolean()}
+    %% Assumed necessary to allow for rapid restart of supervised
+    %% process - e.g. allow for next process to listen on socket even
+    %% when the previous process has not completed the close
+    | {packet, raw}
+    | {active, boolean()}
+%% After a connection is accepted the socket is manually read to be
+%% decoded
+.
 
 -type buffer_option() ::
-    {recbuf, pos_integer()} |
-    {sndbuf, pos_integer()} |
-    {buffer, pos_integer()}
-        % The size of the user-level buffer used by the driver.
-        % Not to be confused with options sndbuf and recbuf, which correspond
-        % to the Kernel socket buffers. For TCP it is recommended to have
-        % val(buffer) >= val(recbuf) to avoid performance issues because
-        % of unnecessary copying
-    .
+    {recbuf, pos_integer()}
+    | {sndbuf, pos_integer()}
+    | {buffer, pos_integer()}
+% The size of the user-level buffer used by the driver.
+% Not to be confused with options sndbuf and recbuf, which correspond
+% to the Kernel socket buffers. For TCP it is recommended to have
+% val(buffer) >= val(recbuf) to avoid performance issues because
+% of unnecessary copying
+.
 
 -type server_name() :: binary().
-    % Name of the root part of the address i.e.
-    % <<"Protocol://Host:Port">>
+% Name of the root part of the address i.e.
+% <<"Protocol://Host:Port">>
 
 -type option() ::
-    {acceptor_pool_start_size, pos_integer()} |
-        % The number of acceptors to be ready to accept an new connection.
-        % This pool size is not a limit, it is is the starting size.  As an
-        % acceptor picks up a new connection request it will prompt for a new
-        % acceptor to be spawned (and will not return to the pool once it is
-        % complete).
-    {acceptor_pool_max_size, pos_integer()} |
-        % The maximum number of acceptors in the pool - the total number of
-        % concurrent requests that can be supported on this port
-    {ssl, boolean()} |
-    {ssl_opts, [ssl:tls_server_option()]} |
-    {ip, inet:ip_address()} |
-    {port, inet:port_number()} |
-    {name, server_name()}.
+    {acceptor_pool_start_size, pos_integer()}
+    % The number of acceptors to be ready to accept an new connection.
+    % This pool size is not a limit, it is is the starting size.  As an
+    % acceptor picks up a new connection request it will prompt for a new
+    % acceptor to be spawned (and will not return to the pool once it is
+    % complete).
+    | {acceptor_pool_max_size, pos_integer()}
+    % The maximum number of acceptors in the pool - the total number of
+    % concurrent requests that can be supported on this port
+    | {ssl, boolean()}
+    | {ssl_opts, [ssl:tls_server_option()]}
+    | {ip, inet:ip_address()}
+    | {port, inet:port_number()}
+    | {name, server_name()}.
 
--type scheme() :: http|https.
+-type scheme() :: http | https.
 
 -type web_options() :: list(option()).
 
--type socket() :: {http, gen_tcp:socket()}|{https, ssl:sslsocket()}.
+-type socket() :: {http, gen_tcp:socket()} | {https, ssl:sslsocket()}.
 
 -type tcp_error() :: closed | timeout | system_limit | inet:posix().
 -type tls_error() :: term().
@@ -192,7 +190,7 @@ acceptor_accepted(Pid) ->
 %%%============================================================================
 
 init(Options) ->
-    BufferOpts = 
+    BufferOpts =
         case get_tcp_buffer_options() of
             [] ->
                 [];
@@ -280,7 +278,6 @@ handle_info({'EXIT', Pid, normal}, State) ->
 handle_info({'EXIT', Pid, Reason}, State) ->
     ?LOG_ERROR("Acceptor ~p unexpectedly crashed: ~0p", [Pid, Reason]),
     handle_info({'EXIT', Pid, normal}, State).
-    
 
 %%%============================================================================
 %%% Internal Functions
@@ -291,13 +288,12 @@ default_socket_options(IPAddr) ->
     [
         {ip, IPAddr},
         binary,
-        {reuseaddr, true},                                            
+        {reuseaddr, true},
         {packet, raw},
         {active, false}
     ].
 
--spec get_acceptor_pool(socket(), list(option())
-) -> 
+-spec get_acceptor_pool(socket(), list(option())) ->
     {list(pid()), pos_integer(), pos_integer()}.
 get_acceptor_pool(Listener, Options) ->
     StartSize =
@@ -323,10 +319,11 @@ get_acceptor_pool(Listener, Options) ->
                 )
         end,
     case {StartSize, MaxSize} of
-        {StartSize, MaxSize} when 
-                is_integer(StartSize),
-                is_integer(MaxSize),
-                MaxSize >= StartSize ->
+        {StartSize, MaxSize} when
+            is_integer(StartSize),
+            is_integer(MaxSize),
+            MaxSize >= StartSize
+        ->
             {start_acceptor_pool(Listener, StartSize), StartSize, MaxSize};
         InvalidConfig ->
             ?LOG_ERROR(
@@ -336,7 +333,7 @@ get_acceptor_pool(Listener, Options) ->
             ),
             {
                 start_acceptor_pool(Listener, ?POOL_SIZE_DEFAULT),
-                ?POOL_SIZE_DEFAULT, 
+                ?POOL_SIZE_DEFAULT,
                 ?POOL_SIZE_MAX_DEFAULT
             }
     end.
@@ -365,10 +362,10 @@ get_tcp_buffer_options() ->
 
 get_tcp_buffer_options([], BufferOptions) ->
     BufferOptions;
-get_tcp_buffer_options([{Name, EnVar}|Rest], BufferOptions) ->
+get_tcp_buffer_options([{Name, EnVar} | Rest], BufferOptions) ->
     case application:get_env(riak_api, EnVar) of
         {ok, BSize} when is_integer(BSize) ->
-            get_tcp_buffer_options(Rest, [{Name, BSize}|BufferOptions]);
+            get_tcp_buffer_options(Rest, [{Name, BSize} | BufferOptions]);
         _ ->
             get_tcp_buffer_options(Rest, BufferOptions)
     end.
@@ -383,7 +380,7 @@ get_scheme({Scheme, _Socket}) ->
     list(socket_option()),
     list(buffer_option()),
     none | list(ssl:tls_server_option())
-) -> 
+) ->
     {ok, socket()} | {error, any()}.
 listen(http, Port, SocketOpts, BufferOpts, none) ->
     case gen_tcp:listen(Port, SocketOpts ++ BufferOpts) of
@@ -403,8 +400,8 @@ listen(https, Port, SocketOpts, BufferOpts, SSLOpts) when SSLOpts =/= none ->
 -spec accept(
     socket(),
     pos_integer()
-) -> 
-    {ok, socket()} |{error, tcp_error()|tls_error()}.
+) ->
+    {ok, socket()} | {error, tcp_error() | tls_error()}.
 accept({http, Socket}, Timeout) ->
     case gen_tcp:accept(Socket, Timeout) of
         {ok, S} ->
@@ -429,7 +426,7 @@ accept({https, Socket}, Timeout) ->
     socket(),
     non_neg_integer(),
     non_neg_integer() | infinity
-) -> 
+) ->
     {ok, binary()} | {error, any()}.
 recv({http, Socket}, Size, Timeout) ->
     case gen_tcp:recv(Socket, Size, Timeout) of

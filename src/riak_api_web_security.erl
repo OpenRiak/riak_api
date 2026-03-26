@@ -8,12 +8,12 @@
 
 -spec is_authorised(
     boolean(),
-    http|https,
+    http | https,
     riak_api_web_headers:headers(),
     {ip, inet:ip_address()}
-) -> 
-    {ok, riak_core_security:context() | undefined} |
-    riak_api_web_acceptor:halt_response().
+) ->
+    {ok, riak_core_security:context() | undefined}
+    | riak_api_web_acceptor:halt_response().
 is_authorised(Enabled, Scheme, ReqHeaders, Peer) ->
     is_authorised(
         Enabled,
@@ -27,8 +27,8 @@ is_authorised(Enabled, Scheme, ReqHeaders, Peer) ->
 
 is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
     case riak_api_web_headers:get_unique_value('Authorization', ReqHeaders) of
-        << ?AUTH_PREFIX, Base64UP/binary>> ->
-            try 
+        <<?AUTH_PREFIX, Base64UP/binary>> ->
+            try
                 UserPass = base64:decode(Base64UP),
                 [User, Pass] = string:lexemes(UserPass, ":"),
                 case AuthFun(User, Pass, [Peer]) of
@@ -38,7 +38,7 @@ is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
                         {halt, 401, <<"~0p">>, [Error]}
                 end
             catch
-                _ : ExError ->
+                _:ExError ->
                     ?LOG_WARNING("Error decoding credentials ~0p", [ExError]),
                     {halt, 400, none, <<"Error decoding credentials">>, []}
             end;
