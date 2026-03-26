@@ -25,10 +25,52 @@
 -module(riak_api_web).
 
 
--export([get_listeners/0,
-         binding_config/2]).
+-export(
+    [
+        get_listeners/0,
+        binding_config/2,
+        add_routes/1,
+        get_route/2
+    ]
+).
 
 -include_lib("kernel/include/logger.hrl").
+
+-define(ROUTE_KEY, {?MODULE, web_routes}).
+
+-type route() :: {1..100, module()}.
+
+
+-spec add_routes(list(route())) -> ok.
+add_routes(Routes) ->
+    CurrentRoutes = persistent_term:get(?ROUTE_KEY, []),
+    NewRoutes = lists:keysort(1, CurrentRoutes ++ Routes),
+    persistent_term:put(?ROUTE_KEY, NewRoutes).
+
+-spec get_route(
+    riak_api_web_acceptor:method(),
+    unicode:chardata()
+) -> 
+    {
+        ok,
+        module(),
+        any(),
+        {pos_integer(), pos_integer(), pos_integer()}
+    } | 
+    riak_api_web_acceptor:halt_response().
+get_route(Method, Path) ->
+    CurrentRoutes = persistent_term:get(?ROUTE_KEY, []),
+    get_route(CurrentRoutes, Method, Path).
+
+get_route([], _Method, _Path) ->
+    {halt, 404, none, <<>>, []};
+get_route([{_P, CallbackMod}|Rest], Method, Path) ->
+    case CallbackMod:match_route(Method, Path) of
+        no_match ->
+            get_route(Rest, Method, Path);
+        {Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}} ->
+            {ok, CallbackMod, Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}}
+    end.
 
 get_listeners() ->
     get_listeners(http) ++ get_listeners(https).
