@@ -26,31 +26,18 @@
 
 -export([get_buffer/1, initiate_body/5, get_body/3]).
 
--ifdef(TEST).
 -record(req_body, 
     {
         buffer :: binary(),
         content_length :: non_neg_integer() | chunked,
         gzip :: boolean(),
-        acc_size :: non_neg_integer(),
+        acc_size = 0 :: non_neg_integer(),
         max_size :: pos_integer(),
         buffer_fun :: buffer_fun(),
-        test_only = undefined :: any()| undefined
-            % to be used in tests to mimic scenarios
+        test_packets = [] :: list(binary())
+            % only used in tests
     }
 ).
--else.
--record(req_body, 
-    {
-        buffer :: binary(),
-        content_length :: non_neg_integer() | chunked,
-        gzip :: boolean(),
-        acc_size :: non_neg_integer(),
-        max_size :: pos_integer(),
-        buffer_fun :: buffer_fun()
-    }
-).
--endif.
 
 -type req_body() :: #req_body{}.
 
@@ -82,7 +69,6 @@ initiate_body(BufferFun, BdyBuffer, CLorChunk, UseGzip, MaxBodySize) ->
             buffer = BdyBuffer,
             content_length = CLorChunk,
             gzip = UseGzip,
-            acc_size = 0,
             max_size = MaxBodySize,
             buffer_fun = BufferFun
         }
@@ -104,7 +90,7 @@ get_body(
     TO
 ) when is_integer(CL) ->
     case byte_size(Bin) + AccSize of
-        AccSize0 when AccSize0 > CL ->
+        AccSize0 when AccSize0 >= CL ->
             <<ReqBody:(CL - AccSize)/binary, Rest/binary>> = Bin,
             {
                 ReqBody,
@@ -170,6 +156,19 @@ get_body(
 ) when CL == chunked, AS > MS ->
     {error, content_too_large}.
 
+-ifdef(TEST).
+extend_buffer(ReqBody, Size, _Timeout) ->
+    {NextBin, RestPackets} =
+        accrue_packets(
+            ReqBody#req_body.test_packets,
+            Size,
+            ReqBody#req_body.buffer
+        ),
+    ReqBody#req_body{
+        buffer = NextBin,
+        test_packets = RestPackets
+    }.
+-else.
 -spec extend_buffer(
     req_body(),
     pos_integer(),
@@ -181,6 +180,7 @@ extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
         buffer =
             BufferFun(ReqBody#req_body.buffer, Size, Timeout)
     }.
+-endif.
 
 %%%============================================================================
 %%% Eunit tests
@@ -188,5 +188,81 @@ extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+slicing_fixed_length_test() ->
+    %% Receive a 11KB body in 1KB packets
+    %% Slicing into 2 4KB portions, and 1 3KB
+    Body = crypto:strong_rand_bytes(11 * 1024),
+    Packets = packet_testbin(Body, []),
+    RqBdyInit =
+        #req_body{
+            buffer = <<>>,
+            content_length = 11 * 1024,
+            max_size = 1024 * 1024,
+            test_packets = Packets
+        },
+    {Slice1, RqBdy1} = get_body(RqBdyInit, 4 * 1024, 60 * 1000),
+    {Slice2, RqBdy2} = get_body(RqBdy1, 4 * 1024, 60 * 1000),
+    {Slice3, RqBdy3} = get_body(RqBdy2, 4 * 1024, 60 * 1000),
+    ?assertMatch(4096, byte_size(Slice1)),
+    ?assertMatch(4096, byte_size(Slice2)),
+    ?assertMatch(3072, byte_size(Slice3)),
+    CompleteResult = <<Slice1/binary, Slice2/binary, Slice3/binary>>,
+    ?assertMatch(Body, CompleteResult),
+    ?assertMatch(<<>>, get_buffer(RqBdy3)),
+    ?assertMatch(done, element(1, get_body(RqBdy3, 4 * 1024, 60 * 1000))),
+    
+    %% Request the full content-length in one shot
+    {AllBin, RqBody4} = get_body(RqBdyInit, all, 60 * 1000),
+    ?assertMatch(AllBin, Body),
+    ?assertMatch(<<>>, get_buffer(RqBody4)),
+
+    % Start with some of the first packet on the buffer, and end with
+    % some of a pipelined request in the buffer
+    [FirstPacket|RestPackets] = Packets,
+    <<OnBuffer:64/binary, OnSocket/binary>> = FirstPacket,
+    DummyRequest = crypto:strong_rand_bytes(64),
+    RqBdyAlt0 =
+        #req_body{
+            buffer = OnBuffer,
+            content_length = 11 * 1024,
+            max_size = 1024 * 1024,
+            test_packets = [OnSocket|RestPackets] ++ [DummyRequest]
+        },
+    {SliceAlt1, RqBdyAlt1} = get_body(RqBdyAlt0, 4 * 1024, 60 * 1000),
+    {SliceAlt2, RqBdyAlt2} = get_body(RqBdyAlt1, 4 * 1024, 60 * 1000),
+    {SliceAlt3, RqBdyAlt3} = get_body(RqBdyAlt2, 4 * 1024, 60 * 1000),
+    ?assertMatch(4096, byte_size(SliceAlt1)),
+    ?assertMatch(4096, byte_size(SliceAlt2)),
+    ?assertMatch(3072, byte_size(SliceAlt3)),
+    CompleteResult = <<Slice1/binary, Slice2/binary, Slice3/binary>>,
+    ?assertMatch(
+        Body,
+        <<SliceAlt1/binary, SliceAlt2/binary, SliceAlt3/binary>>
+    ),
+    SocketBin = iolist_to_binary(RqBdyAlt3#req_body.test_packets),
+    Remainder = <<(RqBdyAlt3#req_body.buffer)/binary, SocketBin/binary>>, 
+    ?assertMatch(DummyRequest, Remainder)
+    .
+
+packet_testbin(<<>>, Acc) ->
+    lists:reverse(Acc);
+packet_testbin(<<Bin:1024/binary, Rest/binary>>, Acc) ->
+    packet_testbin(Rest, [Bin|Acc]).
+
+accrue_packets(Rest, 0, Buffer) ->
+    {Buffer, Rest};
+accrue_packets([NextPacket|Rest], Size, Buffer) ->
+    case Size of
+        Needed when Needed < byte_size(NextPacket) ->
+            <<PartPacket:Needed/binary, RestPacket/binary>> = NextPacket,
+            {<<Buffer/binary, PartPacket/binary>>, [RestPacket|Rest]};
+        Needed ->
+            accrue_packets(
+                Rest,
+                Needed - byte_size(NextPacket),
+                <<Buffer/binary, NextPacket/binary>>
+            )
+    end.
 
 -endif.
