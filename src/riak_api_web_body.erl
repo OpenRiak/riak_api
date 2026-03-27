@@ -33,14 +33,16 @@
     acc_size = 0 :: non_neg_integer(),
     max_size :: pos_integer(),
     buffer_fun :: buffer_fun(),
+    chunk_buff = <<>> :: binary(),
     test_packets = [] :: list(binary())
     % only used in tests
 }).
 
 -type req_body() :: #req_body{}.
+-type fetch_req() :: pos_integer() | line.
 
 -type buffer_fun() ::
-    fun((binary(), pos_integer(), non_neg_integer() | undefined) -> binary()).
+    fun((binary(), fetch_req(), non_neg_integer() | undefined) -> binary()).
 
 -export_type([req_body/0, buffer_fun/0]).
 
@@ -150,11 +152,102 @@ get_body(
             end
     end;
 get_body(
-    #req_body{content_length = CL, max_size = MS, acc_size = AS},
-    _SL,
-    _TO
-) when CL == chunked, AS > MS ->
-    {error, content_too_large}.
+    #req_body{content_length = CL, max_size = MS, acc_size = AS} = RqBdy,
+    all,
+    TO
+) when CL == chunked ->
+    case erlang:decode_packet(line, RqBdy#req_body.buffer, []) of
+        {ok, <<"\r\n">>, Rest} when is_binary(Rest) ->
+            get_body(
+                extend_buffer(
+                    RqBdy#req_body{buffer = Rest},
+                    line,
+                    TO
+                ),
+                all,
+                TO
+            );
+        {ok, Line, Rest} when is_binary(Line) ->
+            ChunkSize = get_chunk_size(Line),
+            RcvBuffer = RqBdy#req_body.chunk_buff,
+            case {ChunkSize, ChunkSize + AS} of
+                {0, _} ->
+                    FinalRqBdy =
+                        case Rest of
+                            <<>> ->
+                                extend_buffer(
+                                    RqBdy#req_body{buffer = <<>>},
+                                    line,
+                                    TO
+                                );
+                            Rest when is_binary(Rest) ->
+                                RqBdy#req_body{buffer = Rest}
+                        end,
+                    <<"\r\n", Next/binary>> = get_buffer(FinalRqBdy),
+                    {
+                        RcvBuffer,
+                        FinalRqBdy#req_body{buffer = Next, chunk_buff = <<>>}
+                    };
+                {N, NextSize} when N > 0, NextSize =< MS ->
+                    case byte_size(Rest) of
+                        BS when BS >= ChunkSize ->
+                            <<Chunk:ChunkSize/binary, FurtherChunks/binary>>
+                                = Rest,
+                            get_body(
+                                RqBdy#req_body{
+                                    buffer = FurtherChunks,
+                                    chunk_buff =
+                                        <<RcvBuffer/binary, Chunk/binary>>,
+                                    acc_size = AS + ChunkSize
+                                },
+                                all,
+                                TO
+                            );
+                        BS ->
+                            Needed = ChunkSize - BS,
+                            UpdRqBdy =
+                                extend_buffer(
+                                    RqBdy#req_body{buffer = Rest},
+                                    Needed,
+                                    TO
+                                ),
+                            Chunk = get_buffer(UpdRqBdy),
+                            get_body(
+                                UpdRqBdy#req_body{
+                                    buffer = <<>>,
+                                    chunk_buff =
+                                        <<RcvBuffer/binary, Chunk/binary>>,
+                                    acc_size = AS + ChunkSize
+                                },
+                                all,
+                                TO
+                            )
+                    end;
+                {_N, _TooBig} ->
+                    {error, content_too_large}
+            end;
+        {more, _} ->
+            % have to get the whole receive buffer, or get one byte at a
+            % time - don't want to ask for more than one byte
+            get_body(
+                extend_buffer(RqBdy, line, TO),
+                all,
+                TO
+            )
+    end.
+
+-spec get_chunk_size(binary()) -> non_neg_integer().
+get_chunk_size(Line) ->
+    case binary:split(string:trim(Line), <<";">>) of
+        [ChunkLength] ->
+            binary_to_integer(ChunkLength, 16);
+        [ChunkLength, _Ignore] ->
+            % There may be a chunk extension after a semi-colon for
+            % progress tracking.
+            % However, these are not expected in our use case, and
+            % could hide security issues - so will ignore.
+            binary_to_integer(ChunkLength, 16)
+    end.
 
 -ifdef(TEST).
 extend_buffer(ReqBody, Size, _Timeout) ->
@@ -164,21 +257,17 @@ extend_buffer(ReqBody, Size, _Timeout) ->
             Size,
             ReqBody#req_body.buffer
         ),
-    ReqBody#req_body{
-        buffer = NextBin,
-        test_packets = RestPackets
-    }.
+    ReqBody#req_body{buffer = NextBin, test_packets = RestPackets}.
 -else.
 -spec extend_buffer(
     req_body(),
-    pos_integer(),
+    pos_integer() | line,
     non_neg_integer() | undefined
 ) ->
     req_body().
 extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
     ReqBody#req_body{
-        buffer =
-            BufferFun(ReqBody#req_body.buffer, Size, Timeout)
+        buffer = BufferFun(ReqBody#req_body.buffer, Size, Timeout)
     }.
 -endif.
 
@@ -244,6 +333,133 @@ slicing_fixed_length_test() ->
     Remainder = <<(RqBdyAlt3#req_body.buffer)/binary, SocketBin/binary>>,
     ?assertMatch(DummyRequest, Remainder).
 
+all_in_buffer_test() ->
+    Body = crypto:strong_rand_bytes(11 * 1024),
+    RqBdyInit =
+        #req_body{
+            buffer = Body,
+            content_length = 11 * 1024,
+            max_size = 1024 * 1024,
+            test_packets = []
+        },
+    {Slice1, RqBdy1} = get_body(RqBdyInit, 4 * 1024, 60 * 1000),
+    {Slice2, RqBdy2} = get_body(RqBdy1, 4 * 1024, 60 * 1000),
+    {Slice3, RqBdy3} = get_body(RqBdy2, 4 * 1024, 60 * 1000),
+    ?assertMatch(4096, byte_size(Slice1)),
+    ?assertMatch(4096, byte_size(Slice2)),
+    ?assertMatch(3072, byte_size(Slice3)),
+    CompleteResult = <<Slice1/binary, Slice2/binary, Slice3/binary>>,
+    ?assertMatch(Body, CompleteResult),
+    ?assertMatch(<<>>, get_buffer(RqBdy3)),
+    ?assertMatch(done, element(1, get_body(RqBdy3, 4 * 1024, 60 * 1000))).
+
+get_empty_body_test() ->
+    RqBdyInit =
+        #req_body{
+            buffer = <<"0\r\n\r\n">>,
+            content_length = chunked,
+            max_size = 1024 * 1024,
+            test_packets = []
+        },
+    {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
+    ?assertMatch(<<>>, Output),
+    ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+get_empty_body_with_pipelined_request_test() ->
+    RqBdyInit =
+        #req_body{
+            buffer = <<"0\r\n\r\nGET /stats HTTP/1.1\r\n">>,
+            content_length = chunked,
+            max_size = 1024 * 1024,
+            test_packets = []
+        },
+    {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
+    ?assertMatch(<<>>, Output),
+    ?assertMatch(<<"GET /stats HTTP/1.1\r\n">>, get_buffer(RqBdyEnd)).
+
+get_standard_wikipedia_test() ->
+    Packets =
+        [
+            <<"4\r\n">>,
+            <<"Wiki\r\n">>,
+            <<"5\r\n">>,
+            <<"pedia\r\n">>,
+            <<"e\r\n">>,
+            <<" in\r\n\r\nchunks.\r\n">>,
+		    <<"0\r\n">>,
+		    <<"\r\n">>
+        ],
+    RqBdyInit =
+        #req_body{
+            buffer = <<"">>,
+            content_length = chunked,
+            max_size = 1024 * 1024,
+            test_packets = Packets
+        },
+    {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
+    ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
+    ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+get_wikipedia_from_buffer_test() ->
+    {ok, RqBdyInit} =
+        initiate_body(
+            fun(B, _, _) -> B end,
+            <<"4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n">>,
+            chunked,
+            false,
+            1024 * 1024
+        ),
+    OtherPackets = [<<"0\r\n">>, <<"\r\n">>],
+    RqBdy = RqBdyInit#req_body{test_packets = OtherPackets},
+    {Output, RqBdyEnd} = get_body(RqBdy, all, 1000),
+    ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
+    ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+ignore_extension_test() ->
+    Packets =
+        [
+            <<"4;ext\r\n">>,
+            <<"Wiki\r\n">>,
+            <<"5;somert">>,
+            <<"\r\n">>,
+            <<"pedia\r\n">>,
+            <<"e\r\n">>,
+            <<" in\r\n\r\nchunks.\r\n">>,
+		    <<"0;other\r\n">>,
+		    <<"\r\n">>
+        ],
+    RqBdyInit =
+        #req_body{
+            buffer = <<"">>,
+            content_length = chunked,
+            max_size = 1024 * 1024,
+            test_packets = Packets
+        },
+    {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
+    ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
+    ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+toobig_chunking_test() ->
+    Packets =
+        [
+            <<"4\r\n">>,
+            <<"Wiki\r\n">>,
+            <<"5\r\n">>,
+            <<"pedia\r\n">>,
+            <<"e\r\n">>,
+            <<" in\r\n\r\nchunks.\r\n">>,
+		    <<"0\r\n">>,
+		    <<"\r\n">>
+        ],
+    RqBdyInit =
+        #req_body{
+            buffer = <<"">>,
+            content_length = chunked,
+            max_size = 20,
+            test_packets = Packets
+        },
+    ?assertMatch({error, content_too_large}, get_body(RqBdyInit, all, 1000)).
+
 packet_testbin(<<>>, Acc) ->
     lists:reverse(Acc);
 packet_testbin(<<Bin:1024/binary, Rest/binary>>, Acc) ->
@@ -251,7 +467,16 @@ packet_testbin(<<Bin:1024/binary, Rest/binary>>, Acc) ->
 
 accrue_packets(Rest, 0, Buffer) ->
     {Buffer, Rest};
-accrue_packets([NextPacket | Rest], Size, Buffer) ->
+accrue_packets([], line, Buffer) ->
+    {Buffer, []};
+accrue_packets([NextPacket|Rest], line, Buffer) ->
+    case erlang:decode_packet(line, NextPacket, []) of
+        {ok, Line, Overhang} ->
+            {<<Buffer/binary, Line/binary>>, [Overhang|Rest]};
+        {more, _} ->
+            accrue_packets(Rest, line, <<Buffer/binary, NextPacket/binary>>)
+    end; 
+accrue_packets([NextPacket | Rest], Size, Buffer) when is_integer(Size) ->
     case Size of
         Needed when Needed < byte_size(NextPacket) ->
             <<PartPacket:Needed/binary, RestPacket/binary>> = NextPacket,

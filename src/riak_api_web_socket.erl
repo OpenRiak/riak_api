@@ -69,6 +69,7 @@
         get_scheme/1,
         accept/2,
         recv/3,
+        recv_line/2,
         send/2,
         close/1,
         get_peer/1,
@@ -439,6 +440,34 @@ recv({https, Socket}, Size, Timeout) ->
     case ssl:recv(Socket, Size, Timeout) of
         {ok, Data} when is_binary(Data) ->
             {ok, Data};
+        {error, Error} ->
+            {error, Error}
+    end.
+
+-spec recv_line(
+    socket(),
+    non_neg_integer() | infinity
+) ->
+    {ok, binary()} | {error, any()}.
+recv_line({http, Socket}, Timeout) ->
+    maybe
+        ok ?= inet:setopts(Socket, [{packet, line}]),
+        {ok, Data} ?= gen_tcp:recv(Socket, 0, Timeout),
+        ok ?= inet:setopts(Socket, [{packet, raw}]),
+        true = is_binary(Data),
+        {ok, Data}
+    else
+        {error, Error} ->
+            {error, Error}
+    end;
+recv_line({https, Socket}, Timeout) ->
+    maybe
+        ok ?= ssl:setopts(Socket, [{packet, line}]),
+        {ok, Data} ?= ssl:recv(Socket, 0, Timeout),
+        ok ?= ssl:setopts(Socket, [{packet, raw}]),
+        true = is_binary(Data),
+        {ok, Data}
+    else
         {error, Error} ->
             {error, Error}
     end.

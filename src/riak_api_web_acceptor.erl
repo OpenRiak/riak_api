@@ -37,13 +37,21 @@
 -define(CONTINUE_RESPONSE, <<"HTTP 1.1 100 Continue">>).
 
 -type response_code() ::
-    400
-    | 413
+    200..204
+    | 300..304
+    | 400
+    | 401
+    | 403..406
+    | 408..415
+    | 428..429
     | 431
-    | 200.
+    | 500
+    | 503
+    | 505
+    | 507.
 
 -type method() ::
-    'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS' | 'TRACE'.
+    'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE'.
 
 -type http_version() ::
     {1, 0} | {1, 1}.
@@ -363,9 +371,7 @@ get_request_line(Socket, Buffer) ->
                             SM == 'HEAD';
                             SM == 'POST';
                             SM == 'PUT';
-                            SM == 'DELETE';
-                            SM == 'OPTIONS';
-                            SM == 'TRACE'
+                            SM == 'DELETE'
                         ->
                             {ok, {SM, Path, SV, Rest}};
                         _USM ->
