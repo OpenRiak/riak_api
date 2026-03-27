@@ -143,7 +143,7 @@
 -type tcp_error() :: closed | timeout | system_limit | inet:posix().
 -type tls_error() :: term().
 
--export_type([socket/0]).
+-export_type([socket/0, scheme/0]).
 
 %%%============================================================================
 %%% API

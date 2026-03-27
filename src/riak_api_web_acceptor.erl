@@ -87,8 +87,9 @@
     }.
 
 -type stream_fun() :: fun(() -> {ok, binary()} | done).
+-type send_fun() :: fun((binary()) -> ok|{error, any()}).
 
--export_type([halt_response/0, method/0]).
+-export_type([halt_response/0, method/0, response_code/0]).
 
 %%%============================================================================
 %%% API
@@ -131,6 +132,10 @@ loop(Socket, InitBuffer) ->
             ok
     end.
 
+-spec handle_request(
+    riak_api_web_socket:socket(), binary()
+) ->
+    {boolean(), binary()} | close.
 handle_request(Socket, InitBuffer) ->
     StartTime = os:system_time(microsecond),
     reset_version(),
@@ -175,7 +180,7 @@ handle_request(Socket, InitBuffer) ->
                     MaxBodySize
                 ),
             ok ?= send_continue(Socket, ReqHeaders),
-            {ok, Code, RspHeaders, RspBody, KeepAliveOK, ReqBdy1, ModCtx4} ?=
+            {ok, ModCtx4, {Code, RspHeaders, RspBody, KeepAliveOK, ReqBdy1}} ?=
                 CallbackMod:process_request(
                     ModCtx3,
                     InitReqBdy
@@ -212,19 +217,20 @@ handle_request(Socket, InitBuffer) ->
 
 -define(VERSION_KEY, {?MODULE, http_version}).
 
-set_version({1, 0}) ->
-    put(?VERSION_KEY, <<"HTTP 1.0">>);
-set_version({1, 1}) ->
-    put(?VERSION_KEY, <<"HTTP 1.1">>).
+-spec set_version(http_version()) -> ok.
+set_version(Version) when Version == {1, 0}; Version == {1, 1} ->
+    put(?VERSION_KEY, Version).
 
+-spec get_version() -> http_version().
 get_version() ->
     case get(?VERSION_KEY) of
         undefined ->
-            <<"HTTP 1.0">>;
+            {1, 0};
         Tag ->
             Tag
     end.
 
+-spec reset_version() -> ok.
 reset_version() ->
     put(?VERSION_KEY, undefined).
 
@@ -267,12 +273,25 @@ split_path(URIPath) ->
 -spec extend_buffer(
     riak_api_web_socket:socket(),
     binary(),
-    non_neg_integer(),
+    non_neg_integer() | line,
     pos_integer() | undefined
 ) ->
     binary().
-extend_buffer(Socket, Buffer, Needed, Timeout) ->
+extend_buffer(Socket, Buffer, Needed, Timeout) when is_integer(Needed) ->
     case riak_api_web_socket:recv(Socket, Needed, get_timeout(Timeout)) of
+        {ok, Data} when is_binary(Data) ->
+            <<Buffer/binary, Data/binary>>;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Unexpected failure to read data from client "
+                "~w for socket ~0p",
+                [Reason, Socket]
+            ),
+            riak_api_web_socket:close(Socket),
+            exit(normal)
+    end;
+extend_buffer(Socket, Buffer, line, Timeout) ->
+    case riak_api_web_socket:recv_line(Socket, get_timeout(Timeout)) of
         {ok, Data} when is_binary(Data) ->
             <<Buffer/binary, Data/binary>>;
         {error, Reason} ->
@@ -471,15 +490,19 @@ handle_response(
     }
 ) ->
     RequestCompleteTime = os:system_time(microsecond),
-    stream_response(RspCode, RspHeaders, StreamFun, Socket),
-    ResponseCompleteTime = os:system_time(microsecond),
-    CallbackMod:record_request(
-        Context,
-        StartTime,
-        RequestCompleteTime,
-        ResponseCompleteTime,
-        stream_complete
+    stream_response(
+        RspCode,
+        RspHeaders,
+        StreamFun,
+        fun(B) -> riak_api_web_socket:send(Socket, B) end
     ),
+    ResponseCompleteTime = os:system_time(microsecond),
+    ok =
+        CallbackMod:record_request(
+            Context,
+            {StartTime, RequestCompleteTime, ResponseCompleteTime},
+            stream_complete
+        ),
     {Keepalive, BufferIn};
 handle_response(
     {
@@ -497,13 +520,12 @@ handle_response(
     RequestCompleteTime = os:system_time(microsecond),
     send_response(RspCode, RspHeaders, RspBody, Socket),
     ResponseCompleteTime = os:system_time(microsecond),
-    CallbackMod:record_request(
-        Context,
-        StartTime,
-        RequestCompleteTime,
-        ResponseCompleteTime,
-        send_complete
-    ),
+    ok =
+        CallbackMod:record_request(
+            Context,
+            {StartTime, RequestCompleteTime, ResponseCompleteTime},
+            send_complete
+        ),
     {Keepalive, BufferIn};
 handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->
     MergedRspHeaders =
@@ -531,11 +553,47 @@ send_continue(Socket, ReqHeaders) ->
     response_code(),
     riak_api_web_headers:headers(),
     stream_fun(),
-    riak_api_web_socket:socket()
+    send_fun()
 ) ->
     ok.
-stream_response(_RspCode, _RspHeaders, _StreamFun, _Socket) ->
-    ok.
+stream_response(RspCode, RspHeaders, StreamFun, SendFun) ->
+    RspLine = get_response_line(get_version(), RspCode),
+    FinalHeaders = 
+        riak_api_web_headers:enter(
+            'Transfer-Encoding',
+            <<"chunked">>,
+            RspHeaders
+        ),
+    Metadata = riak_api_web_headers:output_response_block(FinalHeaders),
+    ok =
+        SendFun(
+            <<
+                RspLine/binary,
+                Metadata/binary,
+                <<"\r\n">>/binary
+            >>
+        ),
+    stream_response(StreamFun, SendFun).
+
+stream_response(StreamFun, SendFun) ->
+    case StreamFun() of
+        {<<>>, NextFun} ->
+            stream_response(NextFun, SendFun);
+        done ->
+            SendFun(<<"0\r\n\r\n">>);
+        {Bin, NextFun} when is_binary(Bin) ->
+            BS = integer_to_binary(byte_size(Bin), 16),
+            ok =
+                SendFun(
+                    <<
+                        BS/binary,
+                        <<"\r\n">>/binary,
+                        Bin/binary,
+                        <<"\r\n">>/binary
+                    >>
+                ),
+            stream_response(NextFun, SendFun)
+    end.
 
 -spec send_response(
     response_code(),
@@ -543,10 +601,56 @@ stream_response(_RspCode, _RspHeaders, _StreamFun, _Socket) ->
     binary(),
     riak_api_web_socket:socket()
 ) ->
-    ok.
-send_response(_RspCode, _RspHeaders, _RspBody, _Socket) ->
-    _Version = get_version(),
-    ok.
+    ok | {error, any()}.
+send_response(RspCode, RspHeaders, RspBody, Socket) ->
+    riak_api_web_socket:send(
+        Socket,
+        generate_binary_response(RspCode, RspHeaders, RspBody)
+    ).
+
+-spec generate_binary_response(
+    response_code(),
+    riak_api_web_headers:headers(),
+    binary()
+) -> 
+    binary().
+generate_binary_response(RspCode, RspHeaders, RspBody) ->
+    RspLine = get_response_line(get_version(), RspCode),
+    FinalHeaders = 
+        riak_api_web_headers:enter(
+            'Content-Length',
+            integer_to_binary(byte_size(RspBody)),
+            RspHeaders
+        ),
+    Metadata = riak_api_web_headers:output_response_block(FinalHeaders),
+    <<
+        RspLine/binary,
+        Metadata/binary,
+        <<"\r\n">>/binary,
+        RspBody/binary
+    >>.
+
+-spec get_response_line(http_version(), response_code()) -> binary().
+get_response_line({1, 0}, RspCode) ->
+    iolist_to_binary(
+        [
+            <<"HTTP/1.0 ">>,
+            integer_to_binary(RspCode),
+            <<" ">>,
+            httpd_util:reason_phrase(RspCode),
+            <<"\r\n">>
+        ]
+    );
+get_response_line({1, 1}, RspCode) ->
+    iolist_to_binary(
+        [
+            <<"HTTP/1.1 ">>,
+            integer_to_binary(RspCode),
+            <<" ">>,
+            httpd_util:reason_phrase(RspCode),
+            <<"\r\n">>
+        ]
+    ).
 
 start_clock() ->
     ets:new(
@@ -603,5 +707,80 @@ clock_test() ->
         [MeanCached, MeanUnCached]
     ),
     ?assert(MeanCached < MeanUnCached).
+
+simple_response_test() ->
+    set_version({1, 1}),
+    FullResponse =
+        generate_binary_response(
+            200,
+            default_response_headers(false),
+            <<"OutputOK">>
+        ),
+    Date = list_to_binary(httpd_util:rfc1123_date()),
+    ExpectedResponse =
+        <<
+            <<"HTTP/1.1 200 OK\r\n">>/binary,
+            <<"Connection: close\r\n">>/binary,
+            <<"Date: ">>/binary,
+            Date/binary,
+            <<"\r\n">>/binary,
+            <<"Server: RiakAPI/4.0 SilverMachine\r\n">>/binary,
+            <<"Content-Length: 8\r\n">>/binary,
+            <<"\r\n">>/binary,
+            <<"OutputOK">>/binary
+        >>,
+    ?assertMatch(ExpectedResponse, FullResponse).
+
+simple_strean_test() ->
+    SendFun =
+        fun(Bin) when is_binary(Bin) ->
+            case get({?MODULE, ?TEST, send_buffer}) of
+                AccBin when is_binary(AccBin) ->
+                    put(
+                        {?MODULE, ?TEST, send_buffer},
+                        <<AccBin/binary, Bin/binary>>
+                    );
+                undefined ->
+                    put({?MODULE, ?TEST, send_buffer}, Bin)
+            end,
+            ok
+        end,
+    put({?MODULE, ?TEST, send_buffer}, undefined),
+    Me = self(),
+    spawn(
+        fun() ->
+            Me ! <<"Wiki">>,
+            Me ! <<"Pedia ">>,
+            Me ! <<"in chunks!">>,
+            Me ! done
+        end
+    ),
+    Date = list_to_binary(httpd_util:rfc1123_date()),
+    stream_response(200, default_response_headers(true), stream_fun(), SendFun),
+    Response = get({?MODULE, ?TEST, send_buffer}),
+    ExpectedResponse =
+        <<
+            <<"HTTP/1.1 200 OK\r\n">>/binary,
+            <<"Connection: keep-alive\r\n">>/binary,
+            <<"Date: ">>/binary,
+            Date/binary,
+            <<"\r\n">>/binary,
+            <<"Transfer-Encoding: chunked\r\n">>/binary,
+            <<"Server: RiakAPI/4.0 SilverMachine\r\n">>/binary,
+            <<"\r\n">>/binary,
+            <<  "4\r\nWiki\r\n6\r\nPedia "
+                "\r\nA\r\nin chunks!\r\n0\r\n\r\n">>/binary
+        >>,
+    ?assertMatch(ExpectedResponse, Response).
+
+stream_fun() ->
+    fun() ->
+        receive
+            Bin when is_binary(Bin) ->
+                {Bin, stream_fun()};
+            done ->
+                done
+        end
+    end.
 
 -endif.
