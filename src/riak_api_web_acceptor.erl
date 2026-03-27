@@ -87,7 +87,7 @@
     }.
 
 -type stream_fun() :: fun(() -> {ok, binary()} | done).
--type send_fun() :: fun((binary()) -> ok|{error, any()}).
+-type send_fun() :: fun((binary()) -> ok | {error, any()}).
 
 -export_type([halt_response/0, method/0, response_code/0]).
 
@@ -558,7 +558,7 @@ send_continue(Socket, ReqHeaders) ->
     ok.
 stream_response(RspCode, RspHeaders, StreamFun, SendFun) ->
     RspLine = get_response_line(get_version(), RspCode),
-    FinalHeaders = 
+    FinalHeaders =
         riak_api_web_headers:enter(
             'Transfer-Encoding',
             <<"chunked">>,
@@ -612,11 +612,11 @@ send_response(RspCode, RspHeaders, RspBody, Socket) ->
     response_code(),
     riak_api_web_headers:headers(),
     binary()
-) -> 
+) ->
     binary().
 generate_binary_response(RspCode, RspHeaders, RspBody) ->
     RspLine = get_response_line(get_version(), RspCode),
-    FinalHeaders = 
+    FinalHeaders =
         riak_api_web_headers:enter(
             'Content-Length',
             integer_to_binary(byte_size(RspBody)),
@@ -768,8 +768,10 @@ simple_strean_test() ->
             <<"Transfer-Encoding: chunked\r\n">>/binary,
             <<"Server: RiakAPI/4.0 SilverMachine\r\n">>/binary,
             <<"\r\n">>/binary,
-            <<  "4\r\nWiki\r\n6\r\nPedia "
-                "\r\nA\r\nin chunks!\r\n0\r\n\r\n">>/binary
+            <<
+                "4\r\nWiki\r\n6\r\nPedia "
+                "\r\nA\r\nin chunks!\r\n0\r\n\r\n"
+            >>/binary
         >>,
     ?assertMatch(ExpectedResponse, Response).
 
