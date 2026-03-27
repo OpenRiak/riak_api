@@ -191,8 +191,8 @@ get_body(
                 {N, NextSize} when N > 0, NextSize =< MS ->
                     case byte_size(Rest) of
                         BS when BS >= ChunkSize ->
-                            <<Chunk:ChunkSize/binary, FurtherChunks/binary>>
-                                = Rest,
+                            <<Chunk:ChunkSize/binary, FurtherChunks/binary>> =
+                                Rest,
                             get_body(
                                 RqBdy#req_body{
                                     buffer = FurtherChunks,
@@ -386,8 +386,8 @@ get_standard_wikipedia_test() ->
             <<"pedia\r\n">>,
             <<"e\r\n">>,
             <<" in\r\n\r\nchunks.\r\n">>,
-		    <<"0\r\n">>,
-		    <<"\r\n">>
+            <<"0\r\n">>,
+            <<"\r\n">>
         ],
     RqBdyInit =
         #req_body{
@@ -425,8 +425,8 @@ ignore_extension_test() ->
             <<"pedia\r\n">>,
             <<"e\r\n">>,
             <<" in\r\n\r\nchunks.\r\n">>,
-		    <<"0;other\r\n">>,
-		    <<"\r\n">>
+            <<"0;other\r\n">>,
+            <<"\r\n">>
         ],
     RqBdyInit =
         #req_body{
@@ -448,8 +448,8 @@ toobig_chunking_test() ->
             <<"pedia\r\n">>,
             <<"e\r\n">>,
             <<" in\r\n\r\nchunks.\r\n">>,
-		    <<"0\r\n">>,
-		    <<"\r\n">>
+            <<"0\r\n">>,
+            <<"\r\n">>
         ],
     RqBdyInit =
         #req_body{
@@ -469,13 +469,13 @@ accrue_packets(Rest, 0, Buffer) ->
     {Buffer, Rest};
 accrue_packets([], line, Buffer) ->
     {Buffer, []};
-accrue_packets([NextPacket|Rest], line, Buffer) ->
+accrue_packets([NextPacket | Rest], line, Buffer) ->
     case erlang:decode_packet(line, NextPacket, []) of
         {ok, Line, Overhang} ->
-            {<<Buffer/binary, Line/binary>>, [Overhang|Rest]};
+            {<<Buffer/binary, Line/binary>>, [Overhang | Rest]};
         {more, _} ->
             accrue_packets(Rest, line, <<Buffer/binary, NextPacket/binary>>)
-    end; 
+    end;
 accrue_packets([NextPacket | Rest], Size, Buffer) when is_integer(Size) ->
     case Size of
         Needed when Needed < byte_size(NextPacket) ->

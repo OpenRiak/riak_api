@@ -219,6 +219,7 @@ init(Options) ->
         "Acceptor pool for web started on IP ~0p port ~w of size ~w",
         [IP, Port, StartSize]
     ),
+    riak_api_web_acceptor:start_clock(),
     {
         ok,
         #socket_state{

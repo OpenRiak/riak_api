@@ -79,5 +79,85 @@ is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+simple_security_test() ->
+    User1 = <<"User1">>,
+    User2 = <<"User2">>,
+    User3 = <<"User3">>,
+    Pass1 = <<"Pass1!">>,
+    Pass2 = <<"Pass2!">>,
+    Pass3 = <<"Pass3!">>,
+    AuthMap = #{User1 => Pass1, User2 => Pass2, User3 => Pass3},
+    AuthFun =
+        fun(User, Pass, _IgnorePeer) when is_binary(Pass) ->
+            case maps:get(User, AuthMap, undefined) of
+                Pass ->
+                    {ok, ok};
+                _ ->
+                    {error, invalid_credentials}
+            end
+        end,
+    Combo1 = base64:encode(iolist_to_binary([User1, <<":">>, Pass1])),
+    ?assertMatch(
+        {ok, ok},
+        is_authorised(
+            true,
+            https,
+            make_request_headers(Combo1),
+            {ip, {127, 0, 0, 1}},
+            AuthFun
+        )
+    ),
+    ?assertMatch(
+        {halt, 400, none, <<"Error decoding credentials">>, []},
+        is_authorised(
+            true,
+            https,
+            make_request_headers(iolist_to_binary([Combo1, <<"A">>])),
+            {ip, {127, 0, 0, 1}},
+            AuthFun
+        )
+    ),
+    BadCombo = base64:encode(iolist_to_binary([User2, <<":">>, Pass1])),
+    ?assertMatch(
+        {halt, 401, <<"~0p">>, [invalid_credentials]},
+        is_authorised(
+            true,
+            https,
+            make_request_headers(BadCombo),
+            {ip, {127, 0, 0, 1}},
+            AuthFun
+        )
+    ),
+    Combo2 = base64:encode(iolist_to_binary([User2, <<":">>, Pass2])),
+    MultipleHeaders =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>},
+                {<<"X-Riak-VClock">>, <<"ABC123==">>},
+                {'Authorization', iolist_to_binary([<<"Basic ">>, Combo1])},
+                {'Authorization', iolist_to_binary([<<"Basic ">>, Combo2])}
+            ]
+        ),
+    ?assertMatch(
+        {halt, 400, none, <<"Error decoding credentials">>, []},
+        is_authorised(
+            true,
+            https,
+            MultipleHeaders,
+            {ip, {127, 0, 0, 1}},
+            AuthFun
+        )
+    ).
+
+make_request_headers(Combo) ->
+    riak_api_web_headers:make(
+        [
+            {'Content-Length', <<"1024">>},
+            {<<"X-Riak-VClock">>, <<"ABC123==">>},
+            {'Authorization', iolist_to_binary([<<"Basic ">>, Combo])}
+        ]
+    ).
 
 -endif.

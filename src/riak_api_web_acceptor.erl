@@ -28,7 +28,7 @@
 
 -export([start_link/1, init/2]).
 
--export([extend_buffer/4]).
+-export([extend_buffer/4, start_clock/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -548,6 +548,60 @@ send_response(_RspCode, _RspHeaders, _RspBody, _Socket) ->
     _Version = get_version(),
     ok.
 
+start_clock() ->
+    ets:new(
+        ?MODULE,
+        [named_table, {read_concurrency, true}]
+    ).
+
 -spec default_response_headers(boolean()) -> riak_api_web_headers:headers().
-default_response_headers(_Keepalive) ->
-    riak_api_web_headers:make_rsp_header([]).
+default_response_headers(KeepAlive) ->
+    DateHeader =
+        case {os:system_time(second), ets:lookup(?MODULE, rfc1123)} of
+            {Now, [{rfc1123, {CachedTime, CachedHdr}}]} when
+                Now == CachedTime
+            ->
+                CachedHdr;
+            {Now, _} ->
+                Hdr = {'Date', list_to_binary(httpd_util:rfc1123_date())},
+                ets:insert(?MODULE, {rfc1123, {Now, Hdr}}),
+                Hdr
+        end,
+    ServerHeader = {'Server', <<"RiakAPI/4.0 SilverMachine">>},
+    ConnectionHeader =
+        case KeepAlive of
+            true ->
+                {'Connection', <<"keep-alive">>};
+            false ->
+                {'Connection', <<"close">>}
+        end,
+    riak_api_web_headers:make_rsp_header(
+        [ServerHeader, DateHeader, ConnectionHeader]
+    ).
+
+%%%============================================================================
+%%% Eunit tests
+%%%============================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+clock_test() ->
+    start_clock(),
+    {TC1, _Hdrs1} = timer:tc(fun() -> default_response_headers(true) end),
+    {TC2, _Hdrs2} = timer:tc(fun() -> default_response_headers(true) end),
+    {TC3, _Hdrs3} = timer:tc(fun() -> default_response_headers(false) end),
+    {TC4, _Hdrs4} = timer:tc(fun() -> default_response_headers(true) end),
+    timer:sleep(1000),
+    {TC5, _Hdrs5} = timer:tc(fun() -> default_response_headers(true) end),
+    ?assertMatch(1, ets:info(?MODULE, size)),
+    MeanUnCached = (TC1 + TC5) div 2,
+    MeanCached = (TC2 + TC3 + TC4) div 3,
+    io:format(
+        user,
+        "Cached ~w micros vs uncached ~w~n",
+        [MeanCached, MeanUnCached]
+    ),
+    ?assert(MeanCached < MeanUnCached).
+
+-endif.
