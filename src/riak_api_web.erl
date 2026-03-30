@@ -29,7 +29,8 @@
         get_listeners/0,
         binding_config/2,
         add_routes/1,
-        get_route/2
+        get_route/2,
+        spec_name/3
     ]
 ).
 
@@ -66,7 +67,16 @@ get_route([{_P, CallbackMod} | Rest], Method, Path) ->
     case CallbackMod:match_route(Method, Path) of
         no_match ->
             get_route(Rest, Method, Path);
-        {Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}} ->
+        {method_not_allowed, AllowedMethods} ->
+            AllowHdrVal =
+                iolist_to_binary(
+                    lists:join(
+                        <<", ">>,
+                        lists:map(fun atom_to_binary/1, AllowedMethods)
+                    )
+                ),
+            {halt, 405, [{'Allow', AllowHdrVal}], <<>>, []};
+        {ok, Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}} ->
             {ok, CallbackMod, Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}}
     end.
 
@@ -102,9 +112,11 @@ binding_config(Scheme, Binding) ->
     Name = spec_name(Scheme, Ip, Port),
     Config = spec_from_binding(Scheme, Name, Binding),
 
-    {Name, {webmachine_mochiweb, start, [Config]}, permanent, 5000, worker, [
-        mochiweb_socket_server
-    ]}.
+    {
+        Name,
+        {riak_api_web_socket, start, [Config]}, permanent, 5000, worker,
+        [riak_api_web_socket]
+    }.
 
 spec_from_binding(http, Name, {Ip, Port}) ->
     Options =
@@ -151,7 +163,7 @@ spec_name(Scheme, Ip, Port) ->
             true ->
                 Ip
         end,
-    lists:flatten(io_lib:format("~s://~s:~p", [Scheme, FormattedIP, Port])).
+    iolist_to_binary(io_lib:format("~s://~s:~p", [Scheme, FormattedIP, Port])).
 
 common_config() ->
     [

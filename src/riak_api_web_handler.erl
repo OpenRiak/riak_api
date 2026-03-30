@@ -49,6 +49,18 @@
     %% if compression is allowed
 -type limits() :: {max_header_count(), max_header_size(), max_body_size()}.
 
+-export_type(
+    [
+        limits/0,
+        peer/0,
+        query_params/0,
+        stream_fun/0,
+        response_body/0,
+        timings/0,
+        completion/0
+    ]
+).
+
 %% @doc match_route for the module
 %% When called each route handled by this module must be checked, and either
 %% `no_match` returned should none match - or the initial context with the
@@ -57,8 +69,9 @@
     riak_api_web_acceptor:method(),
     unicode:chardata()
 ) -> 
-    no_match|{ok, context(), limits()}.
-
+    no_match |
+    {method_not_allowed, list(riak_api_web_acceptor:method())} |
+    {ok, context(), limits()}.
 
 -type peer() :: inet:ip_address().
     %% The IP address of the client device connected to the socket
@@ -79,7 +92,7 @@
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
 
--type query_params() :: #{binary() => binary()}.
+-type query_params() :: [{binary(), binary()}].
 
 %% @doc parse and validate query params, passed as a map
 %% Any parameter will have both key and value as a binary, except if the
@@ -145,11 +158,13 @@
         {
             ok,
             context(),
-            riak_api_web_acceptor:response_code(),
-            riak_api_web_headers:headers(),
-            response_body(),
-            boolean(),
-            riak_api_web_body:req_body()
+            {
+                riak_api_web_acceptor:response_code(),
+                riak_api_web_headers:header_list(),
+                response_body(),
+                boolean(),
+                riak_api_web_body:req_body()
+            }
         } | riak_api_web_acceptor:halt_response().
 
 -type timings() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
