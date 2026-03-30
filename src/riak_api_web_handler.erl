@@ -123,6 +123,10 @@
 %% - a binary() chunk and an updated stream_fun()
 %% - the atom() done
 %% 
+%% The response object may be gzipped - the callback function should handle
+%% this, or error as appropriate. the riak_api_web_body:is_gzip/1 function can
+%% be checked to see if the object is gzipped.
+%% 
 %% Each binary() returned from the stream_fun() will be sent as a chunk in the
 %% response.
 %% 

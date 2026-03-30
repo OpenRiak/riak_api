@@ -731,7 +731,7 @@ simple_response_test() ->
         >>,
     ?assertMatch(ExpectedResponse, FullResponse).
 
-simple_strean_test() ->
+simple_stream_test() ->
     SendFun =
         fun(Bin) when is_binary(Bin) ->
             case get({?MODULE, ?TEST, send_buffer}) of
@@ -784,5 +784,58 @@ stream_fun() ->
                 done
         end
     end.
+
+expect_test() ->
+    FixedLength =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>}
+            ]
+        ),
+    ?assertMatch({ok, {1024, false}}, expect_body(FixedLength)),
+    FixedLengthGZ =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>},
+                {'Transfer-Encoding', <<"gzip">>}
+            ]
+        ),
+    ?assertMatch({ok, {1024, true}}, expect_body(FixedLengthGZ)),
+    UnsupportedCompress =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>},
+                {'Transfer-Encoding', <<"deflate">>}
+            ]
+        ),
+    {halt, 400, none, Error1, _} = expect_body(UnsupportedCompress),
+    ?assertNotMatch(
+        nomatch,
+        string:find(Error1, <<"unsupported transfer encoding">>)
+    ),
+    NoLength =
+        riak_api_web_headers:make(
+            [
+                {'Transfer-Encoding', <<"gzip">>}
+            ]
+        ),
+    {halt, 400, none, Error2, _} = expect_body(NoLength),
+    ?assertNotMatch(
+        nomatch,
+        string:find(Error2, <<"without content length">>)
+    ),
+    ContentSmuggle =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>},
+                {'Transfer-Encoding', <<"gzip">>},
+                {'Content-Length', <<"262144">>}
+            ]
+        ),
+    {halt, 400, none, Error3, _} = expect_body(ContentSmuggle),
+    ?assertNotMatch(
+        nomatch,
+        string:find(Error3, <<"non-unique length">>)
+    ).
 
 -endif.

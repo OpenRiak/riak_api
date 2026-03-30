@@ -21,10 +21,16 @@
 %% @doc Handling functions for receiving and sending object bodies over HTTP
 %%
 %% Handling of chunked requests, and some other parts inspired by webmachine.
+%%
+%% It is possible to accept the inbound request in slices.  If there is a fixed
+%% content length this will read off the receiver buffer a slice of data at a
+%% time.  If the transfer encoding is chunked it will buffer the greater of the
+%% slice length and the chunk length - i.e. sending chunks > than the slice
+%% length will require more memory.
 
 -module(riak_api_web_body).
 
--export([get_buffer/1, initiate_body/5, get_body/3]).
+-export([get_buffer/1, initiate_body/5, get_body/3, is_gzip/1]).
 
 -record(req_body, {
     buffer :: binary(),
@@ -34,6 +40,12 @@
     max_size :: pos_integer(),
     buffer_fun :: buffer_fun(),
     chunk_buff = <<>> :: binary(),
+    % Receive buffer used when chunk encoding
+    % if slice length is all, all body is accumulated here, and if slice
+    % length is an integer a slice will be extracted if the function is
+    % called when the chunk_buff is greater than or equal to the slice
+    % length
+    transfer_complete = false :: boolean(),
     test_packets = [] :: list(binary())
     % only used in tests
 }).
@@ -49,6 +61,10 @@
 %%%============================================================================
 %%% API
 %%%============================================================================
+
+-spec is_gzip(req_body()) -> boolean().
+is_gzip(ReqBody) ->
+    ReqBody#req_body.gzip.
 
 -spec get_buffer(req_body()) -> binary().
 get_buffer(ReqBody) ->
@@ -85,6 +101,12 @@ get_body(#req_body{content_length = CL, max_size = MS}, _SL, _TO) when
 get_body(#req_body{content_length = CL, acc_size = AS} = RqBdy, _SL, _TO) when
     is_integer(CL), CL == AS
 ->
+    {done, RqBdy};
+get_body(
+    #req_body{content_length = CL, transfer_complete = TC} = RqBdy,
+    _SL,
+    _TO
+) when CL == chunked, TC ->
     {done, RqBdy};
 get_body(
     #req_body{content_length = CL, acc_size = AccSize, buffer = Bin} = RqBdy,
@@ -152,8 +174,20 @@ get_body(
             end
     end;
 get_body(
+    #req_body{content_length = CL, chunk_buff = ChunkBuff} = RqBdy,
+    SL,
+    _TO
+) when CL == chunked, is_integer(SL), byte_size(ChunkBuff) >= SL ->
+    <<Slice:SL/binary, ChunkBuffRem/binary>> = ChunkBuff,
+    {
+        Slice,
+        RqBdy#req_body{
+            chunk_buff = ChunkBuffRem
+        }
+    };
+get_body(
     #req_body{content_length = CL, max_size = MS, acc_size = AS} = RqBdy,
-    all,
+    SL,
     TO
 ) when CL == chunked ->
     case erlang:decode_packet(line, RqBdy#req_body.buffer, []) of
@@ -164,7 +198,7 @@ get_body(
                     line,
                     TO
                 ),
-                all,
+                SL,
                 TO
             );
         {ok, Line, Rest} when is_binary(Line) ->
@@ -186,7 +220,11 @@ get_body(
                     <<"\r\n", Next/binary>> = get_buffer(FinalRqBdy),
                     {
                         RcvBuffer,
-                        FinalRqBdy#req_body{buffer = Next, chunk_buff = <<>>}
+                        FinalRqBdy#req_body{
+                            buffer = Next,
+                            chunk_buff = <<>>,
+                            transfer_complete = true
+                        }
                     };
                 {N, NextSize} when N > 0, NextSize =< MS ->
                     case byte_size(Rest) of
@@ -200,7 +238,7 @@ get_body(
                                         <<RcvBuffer/binary, Chunk/binary>>,
                                     acc_size = AS + ChunkSize
                                 },
-                                all,
+                                SL,
                                 TO
                             );
                         BS ->
@@ -219,7 +257,7 @@ get_body(
                                         <<RcvBuffer/binary, Chunk/binary>>,
                                     acc_size = AS + ChunkSize
                                 },
-                                all,
+                                SL,
                                 TO
                             )
                     end;
@@ -227,11 +265,9 @@ get_body(
                     {error, content_too_large}
             end;
         {more, _} ->
-            % have to get the whole receive buffer, or get one byte at a
-            % time - don't want to ask for more than one byte
             get_body(
                 extend_buffer(RqBdy, line, TO),
-                all,
+                SL,
                 TO
             )
     end.
@@ -277,6 +313,7 @@ extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 slicing_fixed_length_test() ->
     %% Receive a 11KB body in 1KB packets
@@ -400,10 +437,38 @@ get_standard_wikipedia_test() ->
     ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
     ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
 
+get_standard_wikipedia_inslices_test() ->
+    Packets =
+        [
+            <<"4\r\n">>,
+            <<"Wiki\r\n">>,
+            <<"5\r\n">>,
+            <<"pedia\r\n">>,
+            <<"e\r\n">>,
+            <<" in\r\n\r\nchunks.\r\n">>,
+            <<"0\r\n">>,
+            <<"\r\n">>
+        ],
+    RqBdyInit =
+        #req_body{
+            buffer = <<"">>,
+            content_length = chunked,
+            max_size = 1024 * 1024,
+            test_packets = Packets
+        },
+    {Slice1, RqBdy1} = get_body(RqBdyInit, 5, 1000),
+    ?assertMatch(<<"Wikip">>, Slice1),
+    {Slice2, RqBdy2} = get_body(RqBdy1, 5, 1000),
+    ?assertMatch(<<"edia ">>, Slice2),
+    {Slice3, RqBdy3} = get_body(RqBdy2, 100, 1000),
+    ?assertMatch(<<"in\r\n\r\nchunks.">>, Slice3),
+    ?assertMatch({done, RqBdy3}, get_body(RqBdy3, 5, 1000)).
+
 get_wikipedia_from_buffer_test() ->
+    <<>> = dummy_extend_fun(<<>>, none, none),
     {ok, RqBdyInit} =
         initiate_body(
-            fun(B, _, _) -> B end,
+            fun dummy_extend_fun/3,
             <<"4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n">>,
             chunked,
             false,
@@ -414,6 +479,8 @@ get_wikipedia_from_buffer_test() ->
     {Output, RqBdyEnd} = get_body(RqBdy, all, 1000),
     ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
     ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+dummy_extend_fun(B, _, _) when is_binary(B) -> B.
 
 ignore_extension_test() ->
     Packets =
@@ -430,7 +497,7 @@ ignore_extension_test() ->
         ],
     RqBdyInit =
         #req_body{
-            buffer = <<"">>,
+            buffer = <<>>,
             content_length = chunked,
             max_size = 1024 * 1024,
             test_packets = Packets
