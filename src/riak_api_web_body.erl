@@ -116,19 +116,9 @@ get_body(
     case byte_size(Bin) + AccSize of
         AccSize0 when AccSize0 >= CL ->
             <<ReqBody:(CL - AccSize)/binary, Rest/binary>> = Bin,
-            {
-                ReqBody,
-                RqBdy#req_body{
-                    buffer = Rest,
-                    acc_size = CL
-                }
-            };
+            {ReqBody, RqBdy#req_body{buffer = Rest, acc_size = CL}};
         AccSize0 ->
-            get_body(
-                extend_buffer(RqBdy, CL - AccSize0, TO),
-                all,
-                TO
-            )
+            get_body(extend_buffer(RqBdy, CL - AccSize0, TO), all, TO)
     end;
 get_body(
     #req_body{content_length = CL, acc_size = AccSize, buffer = Bin} = RqBdy,
@@ -140,19 +130,9 @@ get_body(
             case byte_size(Bin) of
                 BS when BS >= Remaining ->
                     <<SliceBody:Remaining/binary, Rest/binary>> = Bin,
-                    {
-                        SliceBody,
-                        RqBdy#req_body{
-                            buffer = Rest,
-                            acc_size = CL
-                        }
-                    };
+                    {SliceBody, RqBdy#req_body{buffer = Rest, acc_size = CL}};
                 BS ->
-                    get_body(
-                        extend_buffer(RqBdy, Remaining - BS, TO),
-                        all,
-                        TO
-                    )
+                    get_body(extend_buffer(RqBdy, Remaining - BS, TO), SL, TO)
             end;
         _Remaining ->
             case byte_size(Bin) of
@@ -166,11 +146,7 @@ get_body(
                         }
                     };
                 BS ->
-                    get_body(
-                        extend_buffer(RqBdy, SL - BS, TO),
-                        SL,
-                        TO
-                    )
+                    get_body(extend_buffer(RqBdy, SL - BS, TO), SL, TO)
             end
     end;
 get_body(
@@ -179,12 +155,7 @@ get_body(
     _TO
 ) when CL == chunked, is_integer(SL), byte_size(ChunkBuff) >= SL ->
     <<Slice:SL/binary, ChunkBuffRem/binary>> = ChunkBuff,
-    {
-        Slice,
-        RqBdy#req_body{
-            chunk_buff = ChunkBuffRem
-        }
-    };
+    {Slice, RqBdy#req_body{chunk_buff = ChunkBuffRem}};
 get_body(
     #req_body{content_length = CL, max_size = MS, acc_size = AS} = RqBdy,
     SL,
@@ -265,11 +236,7 @@ get_body(
                     {error, content_too_large}
             end;
         {more, _} ->
-            get_body(
-                extend_buffer(RqBdy, line, TO),
-                SL,
-                TO
-            )
+            get_body(extend_buffer(RqBdy, line, TO), SL, TO)
     end.
 
 -spec get_chunk_size(binary()) -> non_neg_integer().
@@ -313,7 +280,6 @@ extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--include_lib("stdlib/include/assert.hrl").
 
 slicing_fixed_length_test() ->
     %% Receive a 11KB body in 1KB packets

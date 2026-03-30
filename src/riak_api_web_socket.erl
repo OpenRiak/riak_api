@@ -44,6 +44,10 @@
 
 -module(riak_api_web_socket).
 
+-if(?OTP_RELEASE == 26).
+-feature(maybe_expr, enable).
+-endif.
+
 -behaviour(gen_server).
 
 -export(
