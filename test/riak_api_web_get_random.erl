@@ -194,6 +194,49 @@ record_request(_Ctx, Timings, Completion) ->
 basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
 
+-define(REQUEST_BIN(ID, Size, KeepAlive),
+    io_lib:format(
+        <<
+            "GET /random_data?required_size=~w HTTP/1.1\r\n"
+            "X-Riak-request_id: ~w\r\n"
+            "Connection: ~w\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        >>,
+        [Size, ID, KeepAlive]
+    )
+).
+
+-define(BAD_VERSION,
+    <<
+        "GET /random_data?required_size=~w HTTP1.1\r\n"
+        "X-Riak-request_id: 1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    >>
+).
+
+-define(WRONG_URL,
+    <<
+        "GET /randon_data?required_size=~w HTTP/1.1\r\n"
+        "X-Riak-request_id: 1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    >>
+).
+
+-define(POST_NOT_GET,
+    <<
+        "POST /random_data?required_size=~w HTTP/1.1\r\n"
+        "X-Riak-request_id: 1\r\n"
+        "Connection: close\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n"
+    >>
+).
+
 setup() ->
     TestPort = find_available_port(lists:seq(8000, 8999)),
     IPAddr = {127, 0, 0, 1},
@@ -215,24 +258,29 @@ generator({_SpecName, IPAddr, Port}) ->
         request_single_value(IPAddr, Port, 32),
         request_single_value(IPAddr, Port, 64),
         request_single_value(IPAddr, Port, 2048),
-        pipeline_request_values(IPAddr, Port, 16)
+        pipeline_request_values(IPAddr, Port, 16),
+        request_error(IPAddr, Port, ?WRONG_URL, 404),
+        request_error(IPAddr, Port, ?POST_NOT_GET, 405),
+        request_error(IPAddr, Port, ?BAD_VERSION, 400)
     ].
 
 cleanup({_SpecName, _IPAddr, _Port}) ->
     ok.
 
--define(REQUEST_BIN(ID, Size, KeepAlive),
-    io_lib:format(
-        <<
-            "GET /random_data?required_size=~w HTTP/1.1\r\n"
-            "X-Riak-request_id: ~w\r\n"
-            "Connection: ~w\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        >>,
-        [Size, ID, KeepAlive]
-    )
-).
+request_error(IPAddr, Port, Msg, ExpectedCode) ->
+    fun() ->
+        {ok, Socket} =
+            gen_tcp:connect(
+                IPAddr,
+                Port,
+                [binary, {packet, raw}, {active, false}]
+            ),
+        ok = gen_tcp:send(Socket, Msg),
+        {ok, Data} = gen_tcp:recv(Socket, 0),
+        ?assertMatch(ok, validate_error(Data, ExpectedCode, Socket)),
+        ok = gen_tcp:close(Socket)
+    end.
+
 
 request_single_value(IPAddr, Port, Size) ->
     fun() ->
@@ -273,31 +321,51 @@ pipeline_request_values(IPAddr, Port, Size) ->
         ok = gen_tcp:close(Socket)
     end.        
 
-extract_headers(Data, Socket) ->
+extract_headers(Data, Socket, ExpectedResponseLine) ->
     maybe
         {ok, L1, R1} ?= erlang:decode_packet(line, Data, []),
-        ?assertMatch(L1, <<"HTTP/1.1 200 OK\r\n">>),
+        ?assertMatch(L1, ExpectedResponseLine),
         {ok, L2, R2} ?= erlang:decode_packet(line, R1, []),
         {ok, L3, R3} ?= erlang:decode_packet(line, R2, []),
         {ok, L4, R4} ?= erlang:decode_packet(line, R3, []),
         {ok, L5, R5} ?= erlang:decode_packet(line, R4, []),
-        {ok, L6, R6} ?= erlang:decode_packet(line, R5, []),
-        {ok, <<"\r\n">>, R7} ?= erlang:decode_packet(line, R6, []),
+        {ok, MaybeL6, R6} ?= erlang:decode_packet(line, R5, []),
+        {ok, L6, Rem} ?=
+            case MaybeL6 of
+                <<"\r\n">> ->
+                    {ok, none, R6};
+                MaybeL6 ->
+                    case erlang:decode_packet(line, R6, []) of
+                        {ok, <<"\r\n">>, R7} ->
+                            {ok, MaybeL6, R7};
+                        {more, _} ->
+                            {more, undefined}
+                    end
+            end,
+
         {
             lists:map(
                 fun(S) -> hd(string:split(S, <<":">>, leading)) end,
-                lists:sort([L2, L3, L4, L5, L6])
+                lists:filter(
+                    fun(H) -> H =/= none end,
+                    lists:sort([L2, L3, L4, L5, L6])
+                )
             ),
-            R7
+            Rem
         }
     else
         {more, _} ->
             {ok, More} = gen_tcp:recv(Socket, 0),
-            extract_headers(<<Data/binary, More/binary>>, Socket)
+            extract_headers(
+                <<Data/binary, More/binary>>,
+                Socket,
+                ExpectedResponseLine
+            )
     end.
 
 validate_response(Data, Size, Socket) ->
-    {HeaderKeys, Rem} = extract_headers(Data, Socket),
+    {HeaderKeys, Rem} =
+        extract_headers(Data, Socket, <<"HTTP/1.1 200 OK\r\n">>),
     ?assertMatch(
         [
             <<"Connection">>,
@@ -312,6 +380,29 @@ validate_response(Data, Size, Socket) ->
     <<ExpectedBody:Size/binary, RestBody/binary>> = RspBody,
     ?assertMatch(Size, byte_size(ExpectedBody)),
     <<RestBody/binary, Rest/binary>>.
+
+validate_error(Data, ExpectedCode, Socket) ->
+    {ExpectedResponseLine, AdditionalHeaderKeys} =
+        case ExpectedCode of
+            400 ->
+                {<<"HTTP/1.0 400 Bad Request\r\n">>, []};
+                    % As it was a bad version - can't assume 1.1
+            404 ->
+                {<<"HTTP/1.1 404 Not Found\r\n">>, []};
+            405 ->
+                {<<"HTTP/1.1 405 Method Not Allowed\r\n">>, [<<"Allow">>]}
+        end,
+    {HeaderKeys, _Rem} = extract_headers(Data, Socket, ExpectedResponseLine),
+    ExpectedHeaderKeys =
+        lists:sort(
+            [
+                <<"Connection">>,
+                <<"Content-Length">>,
+                <<"Date">>,
+                <<"Server">>
+            ] ++ AdditionalHeaderKeys
+        ),
+    ?assertMatch(ExpectedHeaderKeys, HeaderKeys).
 
 find_available_port([]) ->
     no_port_found;

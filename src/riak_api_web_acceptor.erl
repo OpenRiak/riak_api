@@ -26,7 +26,7 @@
 -feature(maybe_expr, enable).
 -endif.
 
--export([start_link/2, init/3]).
+-export([start_link/1, init/2]).
 
 -export([extend_buffer/4, start_clock/0]).
 
@@ -38,17 +38,15 @@
 
 -type response_code() ::
     200..204
+    | 206
     | 300..304
     | 400
-    | 401
-    | 403..406
-    | 408..415
-    | 428..429
+    | 401..406
+    | 408..418
+    | 421..429
     | 431
-    | 500
-    | 503
-    | 505
-    | 507.
+    | 451
+    | 500..508.
 
 -type method() ::
     'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE'.
@@ -71,8 +69,7 @@
         response_code(),
         riak_api_web_headers:header_list(),
         binary(),
-        riak_api_web_socket:socket(),
-        ets:table()
+        riak_api_web_socket:socket()
     }.
 -type good_result() ::
     {
@@ -96,21 +93,21 @@
 %%% API
 %%%============================================================================
 
--spec start_link(riak_api_web_socket:socket(), ets:table()) -> pid().
-start_link(Socket, Clock) ->
-    spawn_link(?MODULE, init, [self(), Socket, Clock]).
+-spec start_link(riak_api_web_socket:socket()) -> pid().
+start_link(Socket) ->
+    spawn_link(?MODULE, init, [self(), Socket]).
 
--spec init(pid(), riak_api_web_socket:socket(), ets:table()) -> ok.
-init(Server, Listener, Clock) ->
+-spec init(pid(), riak_api_web_socket:socket()) -> ok.
+init(Server, Listener) ->
     case riak_api_web_socket:accept(Listener, ?ACCEPT_TIMEOUT) of
         {ok, Socket} ->
             ok = riak_api_web_socket:acceptor_accepted(Server),
-            loop(Socket, <<>>, Clock);
+            loop(Socket, <<>>);
         {error, timeout} ->
-            init(Server, Listener, Clock);
+            init(Server, Listener);
         {error, {tls_alert, Alert}} ->
             ?LOG_WARNING("TLS Alert received ~0p", [Alert]),
-            init(Server, Listener, Clock);
+            init(Server, Listener);
         {error, closed} ->
             ok;
         {error, Other} ->
@@ -121,13 +118,13 @@ init(Server, Listener, Clock) ->
 %%% Primary Loop
 %%%============================================================================
 
--spec loop(riak_api_web_socket:socket(), binary(), ets:table()) -> ok.
-loop(Socket, InitBuffer, Clock) ->
+-spec loop(riak_api_web_socket:socket(), binary()) -> ok.
+loop(Socket, InitBuffer) ->
     %% In the keepalive loop, the send buffer is assumed to be empty
     %% An so pipelining of requests (in parallel) is explicitly not supported
-    case handle_request(Socket, InitBuffer, Clock) of
+    case handle_request(Socket, InitBuffer) of
         {KeepAlive, Buffer} when KeepAlive == true ->
-            loop(Socket, Buffer, Clock);
+            loop(Socket, Buffer);
         _Close ->
             riak_api_web_socket:close(Socket),
             ok
@@ -135,11 +132,10 @@ loop(Socket, InitBuffer, Clock) ->
 
 -spec handle_request(
     riak_api_web_socket:socket(),
-    binary(),
-    ets:table()
+    binary()
 ) ->
     {boolean(), binary()} | close.
-handle_request(Socket, InitBuffer, Clock) ->
+handle_request(Socket, InitBuffer) ->
     StartTime = os:system_time(microsecond),
     reset_version(),
     RequestResult =
@@ -194,7 +190,7 @@ handle_request(Socket, InitBuffer, Clock) ->
             MergedRspHeaders =
                 riak_api_web_headers:enter_from_list(
                     RspHeaders,
-                    default_response_headers(Clock, Keepalive)
+                    default_response_headers(Keepalive)
                 ),
             {
                 finish,
@@ -210,7 +206,7 @@ handle_request(Socket, InitBuffer, Clock) ->
         else
             {halt, HaltRspCode, HaltRspHeaders, HaltRspText, HaltRspSubs} ->
                 HaltRspBody = generate_error_body(HaltRspText, HaltRspSubs),
-                {halt, HaltRspCode, HaltRspHeaders, HaltRspBody, Socket, Clock}
+                {halt, HaltRspCode, HaltRspHeaders, HaltRspBody, Socket}
         end,
     handle_response(RequestResult).
 
@@ -530,11 +526,11 @@ handle_response(
             send_complete
         ),
     {Keepalive, BufferIn};
-handle_response({halt, RspCode, RspHeaders, RspBody, Socket, Clock}) ->
+handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->
     MergedRspHeaders =
         riak_api_web_headers:enter_from_list(
             RspHeaders,
-            default_response_headers(Clock, false)
+            default_response_headers(false)
         ),
     send_response(RspCode, MergedRspHeaders, RspBody, Socket),
     close.
@@ -638,9 +634,7 @@ get_response_line({1, 0}, RspCode) ->
     iolist_to_binary(
         [
             <<"HTTP/1.0 ">>,
-            integer_to_binary(RspCode),
-            <<" ">>,
-            httpd_util:reason_phrase(RspCode),
+            reason_phrase(RspCode),
             <<"\r\n">>
         ]
     );
@@ -648,34 +642,34 @@ get_response_line({1, 1}, RspCode) ->
     iolist_to_binary(
         [
             <<"HTTP/1.1 ">>,
-            integer_to_binary(RspCode),
-            <<" ">>,
-            httpd_util:reason_phrase(RspCode),
+            reason_phrase(RspCode),
             <<"\r\n">>
         ]
     ).
 
+-spec start_clock() -> ok.
 start_clock() ->
-    ets:new(
-        ?MODULE,
-        [public, {read_concurrency, true}]
-    ).
+    ?MODULE =
+        ets:new(
+            ?MODULE,
+            [named_table, public, {read_concurrency, true}]
+        ),
+    ok.
 
 -spec default_response_headers(
-    ets:table(),
     boolean()
 ) ->
     riak_api_web_headers:headers().
-default_response_headers(Clock, KeepAlive) ->
+default_response_headers(KeepAlive) ->
     DateHeader =
-        case {os:system_time(second), ets:lookup(Clock, rfc1123)} of
+        case {os:system_time(second), ets:lookup(?MODULE, rfc1123)} of
             {Now, [{rfc1123, {CachedTime, CachedHdr}}]} when
                 Now == CachedTime
             ->
                 CachedHdr;
             {Now, _} ->
                 Hdr = {'Date', list_to_binary(httpd_util:rfc1123_date())},
-                ets:insert(Clock, {rfc1123, {Now, Hdr}}),
+                ets:insert(?MODULE, {rfc1123, {Now, Hdr}}),
                 Hdr
         end,
     ServerHeader = {'Server', <<"RiakAPI/4.0 SilverMachine">>},
@@ -690,6 +684,59 @@ default_response_headers(Clock, KeepAlive) ->
         [ServerHeader, DateHeader, ConnectionHeader]
     ).
 
+%% @doc
+%% The http_util:reason_phrase/1 returns Object Not Found not Not Found
+%% these are taken direct from RFC 2616
+-spec reason_phrase(response_code()) -> binary().
+reason_phrase(200) -> <<"200 OK">>;
+reason_phrase(201) -> <<"201 Created">>;
+reason_phrase(202) -> <<"202 Accepted">>;
+reason_phrase(203) -> <<"203 Non-Authoritative Information">>;
+reason_phrase(204) -> <<"204 No Content">>;
+reason_phrase(206) -> <<"206 Partial Content">>;
+reason_phrase(300) -> <<"300 Multiple Choices">>;
+reason_phrase(301) -> <<"301 Moved Permanently">>;
+reason_phrase(302) -> <<"302 Found">>;
+reason_phrase(303) -> <<"303 See Other">>;
+reason_phrase(304) -> <<"304 Not Modified">>;
+reason_phrase(400) -> <<"400 Bad Request">>;
+reason_phrase(401) -> <<"401 Unauthorized">>;
+reason_phrase(402) -> <<"402 Payment Required">>;
+reason_phrase(403) -> <<"403 Forbidden">>;
+reason_phrase(404) -> <<"404 Not Found">>;
+reason_phrase(405) -> <<"405 Method Not Allowed">>;
+reason_phrase(406) -> <<"406 Not Acceptable">>;
+reason_phrase(408) -> <<"408 Request Timeout">>;
+reason_phrase(409) -> <<"409 Conflict">>;
+reason_phrase(410) -> <<"410 Gone">>;
+reason_phrase(411) -> <<"411 Length Required">>;
+reason_phrase(412) -> <<"412 Precondition Failed">>;
+reason_phrase(413) -> <<"413 Request Entity Too Large">>;
+reason_phrase(414) -> <<"414 Request-URI Too Long">>;
+reason_phrase(415) -> <<"415 Unsupported Media Type">>;
+reason_phrase(416) -> <<"416 Requested Range Not Satisfiable">>;
+reason_phrase(417) -> <<"417 Expectation Failed">>;
+reason_phrase(418) -> <<"418 I'm a teapot">>;
+reason_phrase(421) -> <<"421 Misdirected Request">>;
+reason_phrase(422) -> <<"422 Unprocessable Entity">>;
+reason_phrase(423) -> <<"423 Locked">>;
+reason_phrase(424) -> <<"424 Failed Dependency">>;
+reason_phrase(425) -> <<"425 Unordered Collection">>;
+reason_phrase(426) -> <<"426 Upgrade Required">>;
+reason_phrase(428) -> <<"428 Precondition Required">>;
+reason_phrase(429) -> <<"429 Too Many Requests">>;
+reason_phrase(431) -> <<"431 Request Header Fields Too Large">>;
+reason_phrase(451) -> <<"451 Unavailable For Legal Reasons">>;
+reason_phrase(500) -> <<"500 Internal Server Error">>;
+reason_phrase(501) -> <<"501 Not Implemented">>;
+reason_phrase(502) -> <<"502 Bad Gateway">>;
+reason_phrase(503) -> <<"503 Service Unavailable">>;
+reason_phrase(504) -> <<"504 Gateway Timeout">>;
+reason_phrase(505) -> <<"505 HTTP Version Not Supported">>;
+reason_phrase(506) -> <<"506 Variant Also Negotiates">>;
+reason_phrase(507) -> <<"507 Insufficient Storage">>;
+reason_phrase(508) -> <<"508 Loop Detected">>.
+
 %%%============================================================================
 %%% Eunit tests
 %%%============================================================================
@@ -698,19 +745,19 @@ default_response_headers(Clock, KeepAlive) ->
 -include_lib("eunit/include/eunit.hrl").
 
 clock_test() ->
-    Clock = start_clock(),
+    ok = start_clock(),
     {TC1, _Hdrs1} =
-        timer:tc(fun() -> default_response_headers(Clock, true) end),
+        timer:tc(fun() -> default_response_headers(true) end),
     {TC2, _Hdrs2} =
-        timer:tc(fun() -> default_response_headers(Clock, true) end),
+        timer:tc(fun() -> default_response_headers(true) end),
     {TC3, _Hdrs3} =
-        timer:tc(fun() -> default_response_headers(Clock, false) end),
+        timer:tc(fun() -> default_response_headers(false) end),
     {TC4, _Hdrs4} =
-        timer:tc(fun() -> default_response_headers(Clock, true) end),
+        timer:tc(fun() -> default_response_headers(true) end),
     timer:sleep(1000),
     {TC5, _Hdrs5} =
-        timer:tc(fun() -> default_response_headers(Clock, true) end),
-    ?assertMatch(1, ets:info(Clock, size)),
+        timer:tc(fun() -> default_response_headers(true) end),
+    ?assertMatch(1, ets:info(?MODULE, size)),
     MeanUnCached = (TC1 + TC5) div 2,
     MeanCached = (TC2 + TC3 + TC4) div 3,
     io:format(
@@ -719,15 +766,15 @@ clock_test() ->
         [MeanCached, MeanUnCached]
     ),
     ?assert(MeanCached < MeanUnCached),
-    ets:delete(Clock).
+    ets:delete(?MODULE).
 
 simple_response_test() ->
-    Clock = start_clock(),
+    ok = start_clock(),
     set_version({1, 1}),
     FullResponse =
         generate_binary_response(
             200,
-            default_response_headers(Clock, false),
+            default_response_headers(false),
             <<"OutputOK">>
         ),
     Date = list_to_binary(httpd_util:rfc1123_date()),
@@ -744,10 +791,10 @@ simple_response_test() ->
             <<"OutputOK">>/binary
         >>,
     ?assertMatch(ExpectedResponse, FullResponse),
-    ets:delete(Clock).
+    ets:delete(?MODULE).
 
 simple_stream_test() ->
-    Clock = start_clock(),
+    ok = start_clock(),
     SendFun =
         fun(Bin) when is_binary(Bin) ->
             case get({?MODULE, ?TEST, send_buffer}) of
@@ -774,7 +821,7 @@ simple_stream_test() ->
     Date = list_to_binary(httpd_util:rfc1123_date()),
     stream_response(
         200,
-        default_response_headers(Clock, true),
+        default_response_headers(true),
         stream_fun(),
         SendFun
     ),
@@ -795,7 +842,7 @@ simple_stream_test() ->
             >>/binary
         >>,
     ?assertMatch(ExpectedResponse, Response),
-    ets:delete(Clock).
+    ets:delete(?MODULE).
 
 stream_fun() ->
     fun() ->

@@ -62,7 +62,7 @@ get_route(Method, Path) ->
     get_route(CurrentRoutes, Method, Path).
 
 get_route([], _Method, _Path) ->
-    {halt, 404, none, <<>>, []};
+    {halt, 404, [], <<>>, []};
 get_route([{_P, CallbackMod} | Rest], Method, Path) ->
     case CallbackMod:match_route(Method, Path) of
         no_match ->

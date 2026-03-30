@@ -291,11 +291,11 @@ parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}) ->
     parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}, {[], 0}).
 
 parse_request_block(_B, _BFun, {MaxCount, _MS}, {_H, C}) when C > MaxCount ->
-    {halt, 431, none, ?COUNT_EXCEEDED, [MaxCount]};
+    {halt, 431, [], ?COUNT_EXCEEDED, [MaxCount]};
 parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}, {HeaderAcc, C}) ->
     case erlang:decode_packet(httph_bin, Buffer, []) of
         {ok, {http_header, _, _, _, V}, _} when byte_size(V) > MaxSize ->
-            {halt, 431, none, ?SIZE_EXCEEDED, [MaxSize]};
+            {halt, 431, [], ?SIZE_EXCEEDED, [MaxSize]};
         {ok, {http_header, _, Key, _OrigKey, Value}, Rest} when is_atom(Key) ->
             parse_request_block(
                 Rest,

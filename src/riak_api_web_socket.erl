@@ -92,8 +92,7 @@
     listener :: socket(),
     pool_size = ?POOL_SIZE_DEFAULT :: pos_integer(),
     max_pool_size = ?POOL_SIZE_MAX_DEFAULT :: pos_integer(),
-    acceptor_pool = sets:new([{version, 2}]) :: sets:set(),
-    clock :: ets:table()
+    acceptor_pool = sets:new([{version, 2}]) :: sets:set()
 }).
 
 -type socket_option() ::
@@ -220,9 +219,8 @@ init(Options) ->
         end,
     SocketOpts = default_socket_options(IP),
     {ok, Listener} = listen(Protocol, Port, SocketOpts, BufferOpts, SSLOpts),
-    Clock = riak_api_web_acceptor:start_clock(),
-    {AcceptorPool, StartSize, MaxSize} =
-        get_acceptor_pool(Listener, Options, Clock),
+    riak_api_web_acceptor:start_clock(),
+    {AcceptorPool, StartSize, MaxSize} = get_acceptor_pool(Listener, Options),
     ?LOG_INFO(
         "Acceptor pool for web started on IP ~0p port ~w of size ~w",
         [IP, Port, StartSize]
@@ -234,8 +232,7 @@ init(Options) ->
             port = Port,
             pool_size = StartSize,
             max_pool_size = MaxSize,
-            acceptor_pool = sets:from_list(AcceptorPool, [{version, 2}]),
-            clock = Clock
+            acceptor_pool = sets:from_list(AcceptorPool, [{version, 2}])
         }
     }.
 
@@ -261,8 +258,7 @@ handle_cast(accepted, State) ->
         PS when PS < State#socket_state.max_pool_size ->
             P = 
                 riak_api_web_acceptor:start_link(
-                    State#socket_state.listener,
-                    State#socket_state.clock
+                    State#socket_state.listener
                 ),
             {
                 noreply,
@@ -293,8 +289,8 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     ?LOG_ERROR("Acceptor ~p unexpectedly crashed: ~0p", [Pid, Reason]),
     handle_info({'EXIT', Pid, normal}, State).
 
-terminate(_Reason, State) ->
-    ets:delete(State#socket_state.clock),
+terminate(_Reason, _State) ->
+    ets:delete(?MODULE),
     ok.
 
 %%%============================================================================
@@ -311,9 +307,9 @@ default_socket_options(IPAddr) ->
         {active, false}
     ].
 
--spec get_acceptor_pool(socket(), list(option()), ets:table()) ->
+-spec get_acceptor_pool(socket(), list(option())) ->
     {list(pid()), pos_integer(), pos_integer()}.
-get_acceptor_pool(Listener, Options, Clock) ->
+get_acceptor_pool(Listener, Options) ->
     StartSize =
         case lists:keyfind(web_acceptor_pool_start_size, 1, Options) of
             {acceptor_pool_start_size, SS} when is_integer(SS), SS > 0 ->
@@ -343,7 +339,7 @@ get_acceptor_pool(Listener, Options, Clock) ->
             MaxSize >= StartSize
         ->
             {
-                start_acceptor_pool(Listener, StartSize, Clock),
+                start_acceptor_pool(Listener, StartSize),
                 StartSize,
                 MaxSize
             };
@@ -354,17 +350,17 @@ get_acceptor_pool(Listener, Options, Clock) ->
                 [InvalidConfig]
             ),
             {
-                start_acceptor_pool(Listener, ?POOL_SIZE_DEFAULT, Clock),
+                start_acceptor_pool(Listener, ?POOL_SIZE_DEFAULT),
                 ?POOL_SIZE_DEFAULT,
                 ?POOL_SIZE_MAX_DEFAULT
             }
     end.
 
--spec start_acceptor_pool(socket(), pos_integer(), ets:table()) -> list(pid()).
-start_acceptor_pool(Listener, Size, Clock) ->
+-spec start_acceptor_pool(socket(), pos_integer()) -> list(pid()).
+start_acceptor_pool(Listener, Size) ->
     lists:map(
         fun(_I) ->
-            P = riak_api_web_acceptor:start_link(Listener, Clock),
+            P = riak_api_web_acceptor:start_link(Listener),
             true = is_pid(P),
             P
         end,
