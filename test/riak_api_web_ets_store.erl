@@ -82,7 +82,9 @@ match_route(Method, _P, [<<>>, <<"ets_object">>, <<"key">>, Key]) when
     };
 match_route(_, _, [<<>>, <<"ets_object">>, <<"key">>, _Key]) ->
     {method_not_allowed, ['GET', 'PUT']};
-match_route(Method, _P, [<<>>, <<"ets_file">>, <<"filename">>, Key]) when Method == 'GET'; Method == 'PUT' ->
+match_route(Method, _P, [<<>>, <<"ets_file">>, <<"filename">>, Key]) when
+    Method == 'GET'; Method == 'PUT'
+->
     {
         ok,
         #context{key = Key, method = Method, type = file},
@@ -191,7 +193,8 @@ process_request(
                             {
                                 {Ctx#context.last_slice_end, SliceSize},
                                 SliceKey
-                            } | Ctx#context.slice_list
+                            }
+                            | Ctx#context.slice_list
                         ],
                     last_slice_end = Ctx#context.last_slice_end + SliceSize
                 },

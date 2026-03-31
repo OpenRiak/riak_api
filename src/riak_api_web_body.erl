@@ -49,7 +49,7 @@
 
     spoof_socket = false :: boolean(),
     test_packets = [] :: list(binary())
-        % only used in tests
+    % only used in tests
 }).
 
 -type req_body() :: #req_body{}.
@@ -260,7 +260,11 @@ get_chunk_size(Line) ->
     non_neg_integer() | undefined
 ) ->
     req_body().
-extend_buffer(#req_body{buffer_fun = BufferFun, spoof_socket = false} = ReqBody, Size, Timeout) ->
+extend_buffer(
+    #req_body{buffer_fun = BufferFun, spoof_socket = false} = ReqBody,
+    Size,
+    Timeout
+) ->
     ReqBody#req_body{
         buffer = BufferFun(ReqBody#req_body.buffer, Size, Timeout)
     };
