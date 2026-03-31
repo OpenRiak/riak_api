@@ -629,20 +629,35 @@ generate_binary_response(RspCode, RspHeaders, RspBody) ->
         RspBody/binary
     >>.
 
+%% @doc
+%% For performance reasons pre-create the whole line for the most common
+%% scenarios
 -spec get_response_line(http_version(), response_code()) -> binary().
-get_response_line({1, 0}, RspCode) ->
+get_response_line({1, 0}, 200) ->
+    <<"HTTP/1.0 200 OK\r\n">>;
+get_response_line({1, 0}, 201) ->
+    <<"HTTP/1.0 201 Accepted\r\n">>;
+get_response_line({1, 1}, 200) ->
+    <<"HTTP/1.1 200 OK\r\n">>;
+get_response_line({1, 1}, 201) ->
+    <<"HTTP/1.1 201 Accepted\r\n">>;
+get_response_line({1, 0}, Code) ->
     iolist_to_binary(
         [
             <<"HTTP/1.0 ">>,
-            reason_phrase(RspCode),
+            integer_to_binary(Code),
+            <<" ">>,
+            reason_phrase(Code),
             <<"\r\n">>
         ]
     );
-get_response_line({1, 1}, RspCode) ->
+get_response_line({1, 1}, Code) ->
     iolist_to_binary(
         [
             <<"HTTP/1.1 ">>,
-            reason_phrase(RspCode),
+            integer_to_binary(Code),
+            <<" ">>,
+            reason_phrase(Code),
             <<"\r\n">>
         ]
     ).
@@ -688,54 +703,8 @@ default_response_headers(KeepAlive) ->
 %% The http_util:reason_phrase/1 returns Object Not Found not Not Found
 %% these are taken direct from RFC 2616
 -spec reason_phrase(response_code()) -> binary().
-reason_phrase(200) -> <<"200 OK">>;
-reason_phrase(201) -> <<"201 Created">>;
-reason_phrase(202) -> <<"202 Accepted">>;
-reason_phrase(203) -> <<"203 Non-Authoritative Information">>;
-reason_phrase(204) -> <<"204 No Content">>;
-reason_phrase(206) -> <<"206 Partial Content">>;
-reason_phrase(300) -> <<"300 Multiple Choices">>;
-reason_phrase(301) -> <<"301 Moved Permanently">>;
-reason_phrase(302) -> <<"302 Found">>;
-reason_phrase(303) -> <<"303 See Other">>;
-reason_phrase(304) -> <<"304 Not Modified">>;
-reason_phrase(400) -> <<"400 Bad Request">>;
-reason_phrase(401) -> <<"401 Unauthorized">>;
-reason_phrase(402) -> <<"402 Payment Required">>;
-reason_phrase(403) -> <<"403 Forbidden">>;
-reason_phrase(404) -> <<"404 Not Found">>;
-reason_phrase(405) -> <<"405 Method Not Allowed">>;
-reason_phrase(406) -> <<"406 Not Acceptable">>;
-reason_phrase(408) -> <<"408 Request Timeout">>;
-reason_phrase(409) -> <<"409 Conflict">>;
-reason_phrase(410) -> <<"410 Gone">>;
-reason_phrase(411) -> <<"411 Length Required">>;
-reason_phrase(412) -> <<"412 Precondition Failed">>;
-reason_phrase(413) -> <<"413 Request Entity Too Large">>;
-reason_phrase(414) -> <<"414 Request-URI Too Long">>;
-reason_phrase(415) -> <<"415 Unsupported Media Type">>;
-reason_phrase(416) -> <<"416 Requested Range Not Satisfiable">>;
-reason_phrase(417) -> <<"417 Expectation Failed">>;
-reason_phrase(418) -> <<"418 I'm a teapot">>;
-reason_phrase(421) -> <<"421 Misdirected Request">>;
-reason_phrase(422) -> <<"422 Unprocessable Entity">>;
-reason_phrase(423) -> <<"423 Locked">>;
-reason_phrase(424) -> <<"424 Failed Dependency">>;
-reason_phrase(425) -> <<"425 Unordered Collection">>;
-reason_phrase(426) -> <<"426 Upgrade Required">>;
-reason_phrase(428) -> <<"428 Precondition Required">>;
-reason_phrase(429) -> <<"429 Too Many Requests">>;
-reason_phrase(431) -> <<"431 Request Header Fields Too Large">>;
-reason_phrase(451) -> <<"451 Unavailable For Legal Reasons">>;
-reason_phrase(500) -> <<"500 Internal Server Error">>;
-reason_phrase(501) -> <<"501 Not Implemented">>;
-reason_phrase(502) -> <<"502 Bad Gateway">>;
-reason_phrase(503) -> <<"503 Service Unavailable">>;
-reason_phrase(504) -> <<"504 Gateway Timeout">>;
-reason_phrase(505) -> <<"505 HTTP Version Not Supported">>;
-reason_phrase(506) -> <<"506 Variant Also Negotiates">>;
-reason_phrase(507) -> <<"507 Insufficient Storage">>;
-reason_phrase(508) -> <<"508 Loop Detected">>.
+reason_phrase(404) -> <<"Not Found">>;
+reason_phrase(N) -> httpd_util:reason_phrase(N).
 
 %%%============================================================================
 %%% Eunit tests

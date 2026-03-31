@@ -190,6 +190,7 @@ record_request(_Ctx, Timings, Completion) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
@@ -246,10 +247,12 @@ setup() ->
             {name, SpecName},
             {ip, IPAddr},
             {port, TestPort},
-            {acceptor_pool_start_size, 4}
+            {web_acceptor_pool_start_size, 4}
         ],
     {ok, _Pid} = riak_api_web_socket:start_link(Options),
     riak_api_web:add_routes([{10, ?MODULE}]),
+    {ok, _HTTPC} = inets:start(httpc, [{profile, test_client}]),
+    ok = httpc:set_options([{verbose, false}], test_client),
     {SpecName, IPAddr, TestPort}
     .
 
@@ -261,10 +264,14 @@ generator({_SpecName, IPAddr, Port}) ->
         pipeline_request_values(IPAddr, Port, 16),
         request_error(IPAddr, Port, ?WRONG_URL, 404),
         request_error(IPAddr, Port, ?POST_NOT_GET, 405),
-        request_error(IPAddr, Port, ?BAD_VERSION, 400)
+        request_error(IPAddr, Port, ?BAD_VERSION, 400),
+        request_with_httpc(IPAddr, Port, 128),
+        request_with_httpc(IPAddr, Port, 16)
     ].
 
-cleanup({_SpecName, _IPAddr, _Port}) ->
+cleanup({SpecName, _IPAddr, _Port}) ->
+    ok = inets:stop(),
+    ?assertMatch(4, riak_api_web_socket:get_active_pool_size(SpecName)),
     ok.
 
 request_error(IPAddr, Port, Msg, ExpectedCode) ->
@@ -281,6 +288,45 @@ request_error(IPAddr, Port, Msg, ExpectedCode) ->
         ok = gen_tcp:close(Socket)
     end.
 
+request_with_httpc({A, B, C, D}, Port, Size) ->
+    fun() ->
+        URI =
+            lists:flatten(
+                io_lib:format(
+                    "http://~w.~w.~w.~w:~w/random_data?required_size=~w",
+                    [A, B, C, D, Port, Size]
+                )
+            ),
+        {ok, {{"HTTP/1.1", 200, "OK"}, ResponseHeaders, ResponseBody}} =
+            httpc:request(
+                get,
+                {
+                    URI,
+                    [{"X-Riak-request_id", integer_to_binary(1)}]
+                },
+                [],
+                [],
+                test_client
+            ),
+        ?assertMatch(
+            {"connection", "keep-alive"},
+            lists:keyfind("connection", 1, ResponseHeaders)
+        ),
+        ?assertMatch(
+            {"server", "RiakAPI/4.0 SilverMachine"},
+            lists:keyfind("server", 1, ResponseHeaders)
+        ),
+        SizeL = integer_to_list(Size),
+        ?assertMatch(
+            {"content-length", SizeL},
+            lists:keyfind("content-length", 1, ResponseHeaders)
+        ),
+        ?assertMatch(
+            {"x-riak-request_id", "1"},
+            lists:keyfind("x-riak-request_id", 1, ResponseHeaders)
+        ),
+        ?assertMatch(Size, length(ResponseBody))
+    end.
 
 request_single_value(IPAddr, Port, Size) ->
     fun() ->

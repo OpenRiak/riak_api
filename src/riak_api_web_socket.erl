@@ -196,6 +196,7 @@ acceptor_accepted(Pid) ->
 %%%============================================================================
 
 init(Options) ->
+    process_flag(trap_exit, true),
     BufferOpts =
         case get_tcp_buffer_options() of
             [] ->
@@ -256,7 +257,7 @@ handle_cast({set_max_pool_size, MPS}, State) ->
 handle_cast(accepted, State) ->
     case State#socket_state.pool_size of
         PS when PS < State#socket_state.max_pool_size ->
-            P = 
+            P =
                 riak_api_web_acceptor:start_link(
                     State#socket_state.listener
                 ),
@@ -290,7 +291,6 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     handle_info({'EXIT', Pid, normal}, State).
 
 terminate(_Reason, _State) ->
-    ets:delete(?MODULE),
     ok.
 
 %%%============================================================================
@@ -312,7 +312,7 @@ default_socket_options(IPAddr) ->
 get_acceptor_pool(Listener, Options) ->
     StartSize =
         case lists:keyfind(web_acceptor_pool_start_size, 1, Options) of
-            {acceptor_pool_start_size, SS} when is_integer(SS), SS > 0 ->
+            {web_acceptor_pool_start_size, SS} when is_integer(SS), SS > 0 ->
                 SS;
             false ->
                 application:get_env(
@@ -323,7 +323,7 @@ get_acceptor_pool(Listener, Options) ->
         end,
     MaxSize =
         case lists:keyfind(web_acceptor_pool_max_size, 1, Options) of
-            {acceptor_pool_start_size, MS} when is_integer(MS), MS > 0 ->
+            {web_acceptor_pool_start_size, MS} when is_integer(MS), MS > 0 ->
                 MS;
             false ->
                 application:get_env(
