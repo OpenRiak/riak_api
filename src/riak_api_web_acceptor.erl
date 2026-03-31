@@ -28,7 +28,7 @@
 
 -export([start_link/1, init/2]).
 
--export([extend_buffer/4, start_clock/0]).
+-export([extend_buffer/4, start_clock/0, stop_clock/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -676,6 +676,10 @@ start_clock() ->
         ),
     ok.
 
+-spec stop_clock() -> true.
+stop_clock() ->
+    ets:delete(?MODULE).
+
 -spec default_response_headers(
     boolean()
 ) ->
@@ -706,9 +710,12 @@ default_response_headers(KeepAlive) ->
 
 %% @doc
 %% The http_util:reason_phrase/1 returns Object Not Found not Not Found
-%% these are taken direct from RFC 2616
+%% these are taken direct from RFC 2616.  Likewise "Request Entity Too Large"
+%% rather than the more common "Content Too Large"
 -spec reason_phrase(response_code()) -> binary().
 reason_phrase(404) -> <<"Not Found">>;
+reason_phrase(413) -> <<"Content Too Large">>;
+reason_phrase(431) -> <<"Request Header Fields Too Large">>;
 reason_phrase(N) -> httpd_util:reason_phrase(N).
 
 %%%============================================================================

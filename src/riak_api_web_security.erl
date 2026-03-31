@@ -62,14 +62,14 @@ is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
             catch
                 _:ExError ->
                     ?LOG_WARNING("Error decoding credentials ~0p", [ExError]),
-                    {halt, 400, none, <<"Error decoding credentials">>, []}
+                    {halt, 400, [], <<"Error decoding credentials">>, []}
             end;
         Unexpected ->
             ?LOG_WARNING("Error decoding credentials ~0p", [Unexpected]),
-            {halt, 400, none, <<"Error decoding credentials">>, []}
+            {halt, 400, [], <<"Error decoding credentials">>, []}
     end;
 is_authorised(true, http, _ReqHeaders, _Peer, _AuthFun) ->
-    {halt, 426, none, <<"Upgrade required to https">>};
+    {halt, 426, [], <<"Upgrade required to https">>};
 is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
     {true, undefined}.
 
@@ -79,7 +79,6 @@ is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--include_lib("stdlib/include/assert.hrl").
 
 simple_security_test() ->
     User1 = <<"User1">>,
@@ -110,7 +109,7 @@ simple_security_test() ->
         )
     ),
     ?assertMatch(
-        {halt, 400, none, <<"Error decoding credentials">>, []},
+        {halt, 400, [], <<"Error decoding credentials">>, []},
         is_authorised(
             true,
             https,
@@ -141,7 +140,7 @@ simple_security_test() ->
             ]
         ),
     ?assertMatch(
-        {halt, 400, none, <<"Error decoding credentials">>, []},
+        {halt, 400, [], <<"Error decoding credentials">>, []},
         is_authorised(
             true,
             https,

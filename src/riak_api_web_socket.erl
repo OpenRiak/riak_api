@@ -77,6 +77,7 @@
         recv_line/2,
         send/2,
         close/1,
+        stop/1,
         get_peer/1,
         acceptor_accepted/1
     ]
@@ -191,6 +192,14 @@ set_max_pool_size(ServerName, MaxPoolSize) when is_integer(MaxPoolSize) ->
 acceptor_accepted(Pid) ->
     gen_server:cast(Pid, accepted).
 
+-spec stop(server_name()) -> ok.
+stop(ServerName) ->
+    gen_server:call(
+        binary_to_existing_atom(ServerName),
+        stop,
+        infinity
+    ).
+
 %%%============================================================================
 %%% gen_server callbacks
 %%%============================================================================
@@ -240,7 +249,9 @@ init(Options) ->
 handle_call(get_max_pool_size, _From, State) ->
     {reply, State#socket_state.max_pool_size, State};
 handle_call(get_active_pool_size, _From, State) ->
-    {reply, sets:size(State#socket_state.acceptor_pool), State}.
+    {reply, sets:size(State#socket_state.acceptor_pool), State};
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State}.
 
 handle_cast({set_max_pool_size, MPS}, State) ->
     case State#socket_state.pool_size of
@@ -291,6 +302,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     handle_info({'EXIT', Pid, normal}, State).
 
 terminate(_Reason, _State) ->
+    riak_api_web_acceptor:stop_clock(),
     ok.
 
 %%%============================================================================

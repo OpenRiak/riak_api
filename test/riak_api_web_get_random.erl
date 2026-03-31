@@ -239,6 +239,7 @@ basic_handler_test_() ->
 ).
 
 setup() ->
+    inets:start(),
     TestPort = find_available_port(lists:seq(8000, 8999)),
     IPAddr = {127, 0, 0, 1},
     SpecName = riak_api_web:spec_name(http, IPAddr, TestPort),
@@ -272,6 +273,7 @@ generator({_SpecName, IPAddr, Port}) ->
 cleanup({SpecName, _IPAddr, _Port}) ->
     ok = inets:stop(),
     ?assertMatch(4, riak_api_web_socket:get_active_pool_size(SpecName)),
+    riak_api_web_socket:stop(SpecName),
     ok.
 
 request_error(IPAddr, Port, Msg, ExpectedCode) ->
