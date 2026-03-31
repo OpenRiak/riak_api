@@ -200,7 +200,20 @@ basic_handler_test_() ->
         <<
             "GET /random_data?required_size=~w HTTP/1.1\r\n"
             "X-Riak-request_id: ~w\r\n"
-            "Connection: ~w\r\n"
+            "Connection: ~s\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        >>,
+        [Size, ID, KeepAlive]
+    )
+).
+
+-define(REQUEST_BIN_V10(ID, Size, KeepAlive),
+    io_lib:format(
+        <<
+            "GET /random_data?required_size=~w HTTP/1.0\r\n"
+            "X-Riak-request_id: ~w\r\n"
+            "Connection: ~s\r\n"
             "Content-Length: 0\r\n"
             "\r\n"
         >>,
@@ -263,6 +276,7 @@ generator({_SpecName, IPAddr, Port}) ->
         request_single_value(IPAddr, Port, 64),
         request_single_value(IPAddr, Port, 2048),
         pipeline_request_values(IPAddr, Port, 16),
+        request_keepalive_v10(IPAddr, Port, 256),
         request_error(IPAddr, Port, ?WRONG_URL, 404),
         request_error(IPAddr, Port, ?POST_NOT_GET, 405),
         request_error(IPAddr, Port, ?BAD_VERSION, 400),
@@ -338,10 +352,37 @@ request_single_value(IPAddr, Port, Size) ->
                 Port,
                 [binary, {packet, raw}, {active, false}]
             ),
-        Request = ?REQUEST_BIN(1, Size, close),
+        Request = ?REQUEST_BIN(1, Size, <<"close">>),
         ok = gen_tcp:send(Socket, Request),
         {ok, Data} = gen_tcp:recv(Socket, 0),
         ?assertMatch(<<>>, validate_response(Data, Size, Socket)),
+        ok = gen_tcp:close(Socket)
+    end.
+
+request_keepalive_v10(IPAddr, Port, Size) ->
+    fun() ->
+        {ok, Socket} =
+            gen_tcp:connect(
+                IPAddr,
+                Port,
+                [binary, {packet, raw}, {active, false}]
+            ),
+        Request =
+            list_to_binary(
+                lists:flatten(?REQUEST_BIN_V10(1, Size, <<"keep-alive">>))
+            ),
+        ok = gen_tcp:send(Socket, Request),
+        {ok, Data1} = gen_tcp:recv(Socket, 0),
+        ?assertMatch(
+            <<>>,
+            validate_response(Data1, Size, Socket, <<"HTTP/1.0 200 OK\r\n">>)
+        ),
+        ok = gen_tcp:send(Socket, Request),
+        {ok, Data2} = gen_tcp:recv(Socket, 0),
+        ?assertMatch(
+            <<>>,
+            validate_response(Data2, Size, Socket, <<"HTTP/1.0 200 OK\r\n">>)
+        ),
         ok = gen_tcp:close(Socket)
     end.
 
@@ -355,7 +396,7 @@ pipeline_request_values(IPAddr, Port, Size) ->
             ),
         Requests =
             lists:map(
-                fun(I) -> ?REQUEST_BIN(I, Size, 'keep-alive') end,
+                fun(I) -> ?REQUEST_BIN(I, Size, <<"keep-alive">>) end,
                 lists:seq(1, 5)
             ),
         Request = iolist_to_binary(Requests),
@@ -412,8 +453,11 @@ extract_headers(Data, Socket, ExpectedResponseLine) ->
     end.
 
 validate_response(Data, Size, Socket) ->
+    validate_response(Data, Size, Socket, <<"HTTP/1.1 200 OK\r\n">>).
+
+validate_response(Data, Size, Socket, StatusLine) ->
     {HeaderKeys, Rem} =
-        extract_headers(Data, Socket, <<"HTTP/1.1 200 OK\r\n">>),
+        extract_headers(Data, Socket, StatusLine),
     ?assertMatch(
         [
             <<"Connection">>,
