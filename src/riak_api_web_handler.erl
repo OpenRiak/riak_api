@@ -21,7 +21,7 @@
 %% 
 %% the callbacks will be called in the following order, with the context
 %% returned from the previous call included in the next
-%% - match_route/2
+%% - match_route/3
 %% - check_permissions/4
 %% - parse_query_params/2
 %% - parse_request_headers/2

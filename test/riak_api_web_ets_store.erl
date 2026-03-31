@@ -163,7 +163,6 @@ process_request(
 ) ->
     case ets:lookup(?MODULE, {file, Key}) of
         [{{file, Key}, SliceList}] ->
-            io:format(user, "Streaming ~w slices~n", [length(SliceList)]),
             {
                 ok,
                 Ctx,
@@ -250,6 +249,7 @@ record_request(Ctx, Timings, Completion) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
@@ -281,7 +281,9 @@ generator({_SpecName, IPAddr, Port}) ->
         put_then_get(IPAddr, Port),
         put_too_big(IPAddr, Port),
         put_big_header(IPAddr, Port),
-        put_then_get_big_file(IPAddr, Port)
+        put_then_get_file(IPAddr, Port),
+        raw_put_then_get_file(IPAddr, Port),
+        raw_put_toobig_object(IPAddr, Port)
     ].
 
 cleanup({SpecName, _IPAddr, _Port}) ->
@@ -290,7 +292,121 @@ cleanup({SpecName, _IPAddr, _Port}) ->
     riak_api_web_socket:stop(SpecName),
     ok.
 
-put_then_get_big_file({A, B, C, D}, Port) ->
+raw_put_toobig_object({A, B, C, D}, Port) ->
+    fun() ->
+        {ok, Socket} =
+            gen_tcp:connect(
+                {A, B, C, D},
+                Port,
+                [binary, {packet, raw}, {active, false}]
+            ),
+        RequestHead =
+            <<
+                "PUT /ets_object/key/K0006 HTTP/1.1\r\n"
+                "Connection: close\r\n"
+                "Transfer-Encoding: chunked\r\n"
+                "\r\n"
+            >>,
+        gen_tcp:send(Socket, RequestHead),
+        _Hash = send_chunked_4KBobject(Socket),
+        ok = inet:setopts(Socket, [{packet, line}]),
+        {ok, L1} = gen_tcp:recv(Socket, 0, 10000),
+        ?assertMatch(
+            <<"HTTP/1.1 413 Content Too Large\r\n">>,
+            L1
+        ),
+        ok = inet:setopts(Socket, [{packet, raw}]),
+        {ok, _RspHdrs} = gen_tcp:recv(Socket, 0, 10000),
+        ok = gen_tcp:close(Socket)
+    end.
+
+raw_put_then_get_file({A, B, C, D}, Port) ->
+    fun() ->
+        {ok, Socket} =
+            gen_tcp:connect(
+                {A, B, C, D},
+                Port,
+                [binary, {packet, raw}, {active, false}]
+            ),
+        RequestHead =
+            <<
+                "PUT /ets_file/filename/K0005 HTTP/1.1\r\n"
+                "Connection: close\r\n"
+                "Transfer-Encoding: chunked\r\n"
+                "\r\n"
+            >>,
+        gen_tcp:send(Socket, RequestHead),
+        Hash = send_chunked_4KBobject(Socket),
+        ok = inet:setopts(Socket, [{packet, line}]),
+        {ok, L1} = gen_tcp:recv(Socket, 0, 10000),
+        ?assertMatch(
+            <<"HTTP/1.1 204 No Content\r\n">>,
+            L1
+        ),
+        ok = inet:setopts(Socket, [{packet, raw}]),
+        {ok, _RspHdrs} = gen_tcp:recv(Socket, 0, 10000),
+        ok = gen_tcp:close(Socket),
+        URI =
+            lists:flatten(
+                io_lib:format(
+                    "http://~w.~w.~w.~w:~w/ets_file/filename/~s",
+                    [A, B, C, D, Port, <<"K0005">>]
+                )
+            ),
+        {ok, {{"HTTP/1.1", 200, "OK"}, _FetchHeaders, FetchBody}} =
+            httpc:request(
+                get,
+                {URI, []},
+                [],
+                [{body_format, binary}],
+                test_client
+            ),
+        ?assert(is_binary(FetchBody)),
+        ?assertMatch(41020, byte_size(FetchBody)),
+        ReturnedHash = crypto:hash(md5, FetchBody),
+        ?assertMatch(Hash, ReturnedHash)
+    end.
+
+send_chunked_4KBobject(Socket) ->
+    TestValue = crypto:strong_rand_bytes((10 * 4092) + 100),
+    Hash = crypto:hash(md5, TestValue),
+    <<
+        Chunk1:4092/binary,
+        Chunk2:4092/binary,
+        Chunk3:4092/binary,
+        Chunk4:4092/binary,
+        Chunk5:4092/binary,
+        Chunk6:4092/binary,
+        Chunk7:4092/binary,
+        Chunk8:4092/binary,
+        Chunk9:4092/binary,
+        Chunk10:4092/binary,
+        Chunk11:100/binary
+    >> = TestValue,
+    lists:foreach(
+        fun(Chunk) ->
+            Size = integer_to_binary(byte_size(Chunk), 16),
+            Bin = iolist_to_binary([Size, <<"\r\n">>, Chunk, <<"\r\n">>]),
+            gen_tcp:send(Socket, Bin)
+        end,
+        [
+            Chunk1,
+            Chunk2,
+            Chunk3,
+            Chunk4,
+            Chunk5,
+            Chunk6,
+            Chunk7,
+            Chunk8,
+            Chunk9,
+            Chunk10,
+            Chunk11
+        ]
+    ),
+    gen_tcp:send(Socket, <<"0\r\n\r\n">>),
+    Hash.
+
+put_then_get_file({A, B, C, D}, Port) ->
     fun() ->
         Key = <<"K0004">>,
         URI =
