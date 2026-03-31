@@ -67,7 +67,8 @@
 %% limits for that route.
 -callback match_route(
     riak_api_web_acceptor:method(),
-    unicode:chardata()
+    unicode:chardata(),
+    list(unicode:chardata())
 ) -> 
     no_match |
     {method_not_allowed, list(riak_api_web_acceptor:method())} |

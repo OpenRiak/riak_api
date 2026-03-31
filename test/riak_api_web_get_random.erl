@@ -29,7 +29,7 @@
 
 -export(
     [
-        match_route/2,
+        match_route/3,
         check_permissions/4,
         parse_query_params/2,
         parse_request_headers/2,
@@ -63,16 +63,17 @@
 %% @doc match_route for the module
 -spec match_route(
     riak_api_web_acceptor:method(),
-    unicode:chardata()
+    unicode:chardata(),
+    list(unicode:chardata())
 ) -> 
     no_match |
     {method_not_allowed, list(riak_api_web_acceptor:method())} |
     {ok, context(), riak_api_web_handler:limits()}.
-match_route('GET', <<"/random_data">>) ->
+match_route('GET', <<"/random_data">>, _SP) ->
     {ok, #context{}, {10, 1024, 128 * 1024}};
-match_route(_, <<"/random_data">>) ->
+match_route(_, <<"/random_data">>, _SP) ->
     {method_not_allowed, ['GET']};
-match_route(_, _) ->
+match_route(_, _, _) ->
     no_match.
 
 %% @doc check_permissions for using this module or route
@@ -190,7 +191,6 @@ record_request(_Ctx, Timings, Completion) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--include_lib("stdlib/include/assert.hrl").
 
 basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.

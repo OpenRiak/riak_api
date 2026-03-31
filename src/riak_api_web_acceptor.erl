@@ -144,14 +144,14 @@ handle_request(Socket, InitBuffer) ->
             {ok, {Method, RawPath, Version, HdrBuffer}} ?=
                 get_request_line(Socket, InitBuffer),
             set_version(Version),
-            {ok, {Path, QueryParams}} ?= split_path(RawPath),
+            {ok, {Path, SplitPath, QueryParams}} ?= split_path(RawPath),
             {
                 ok,
                 CallbackMod,
                 InitModCtx,
                 {MaxHdrCount, MaxHdrSize, MaxBodySize}
             } ?=
-                riak_api_web:get_route(Method, Path),
+                riak_api_web:get_route(Method, Path, SplitPath),
             {ok, ReqHeaders, BdyBuffer} ?=
                 get_request_headers(
                     HdrBuffer,
@@ -246,16 +246,21 @@ bad_request(Error, Subs) ->
 ) ->
     {
         ok,
-        {unicode:chardata(), [{unicode:chardata(), unicode:chardata() | true}]}
+        {
+            unicode:chardata(),
+            list(unicode:chardata()),
+            [{unicode:chardata(), unicode:chardata() | true}]
+        }
     }
     | halt_response().
 split_path(URIPath) ->
     case uri_string:normalize(URIPath, [return_map]) of
         URIMap when is_map(URIMap) ->
             Path = maps:get(path, URIMap, <<"">>),
+            SplitPath = string:split(Path, <<"/">>, all),
             case uri_string:dissect_query(maps:get(query, URIMap, <<"">>)) of
                 QueryParams when is_list(QueryParams) ->
-                    {ok, {Path, QueryParams}};
+                    {ok, {Path, SplitPath, QueryParams}};
                 {error, QTerm, QReason} ->
                     bad_request(
                         <<"Query parameters not parsed ~w  - ~0p">>,

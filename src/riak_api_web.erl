@@ -29,7 +29,7 @@
         get_listeners/0,
         binding_config/2,
         add_routes/1,
-        get_route/2,
+        get_route/3,
         spec_name/3
     ]
 ).
@@ -48,7 +48,8 @@ add_routes(Routes) ->
 
 -spec get_route(
     riak_api_web_acceptor:method(),
-    unicode:chardata()
+    unicode:chardata(),
+    list(unicode:chardata())
 ) ->
     {
         ok,
@@ -57,16 +58,16 @@ add_routes(Routes) ->
         {pos_integer(), pos_integer(), pos_integer()}
     }
     | riak_api_web_acceptor:halt_response().
-get_route(Method, Path) ->
+get_route(Method, Path, SplitPath) ->
     CurrentRoutes = persistent_term:get(?ROUTE_KEY, []),
-    get_route(CurrentRoutes, Method, Path).
+    get_route(CurrentRoutes, Method, Path, SplitPath).
 
-get_route([], _Method, _Path) ->
+get_route([], _Method, _Path, _SP) ->
     {halt, 404, [], <<>>, []};
-get_route([{_P, CallbackMod} | Rest], Method, Path) ->
-    case CallbackMod:match_route(Method, Path) of
+get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
+    case CallbackMod:match_route(Method, Path, SplitPath) of
         no_match ->
-            get_route(Rest, Method, Path);
+            get_route(Rest, Method, Path, SplitPath);
         {method_not_allowed, AllowedMethods} ->
             AllowHdrVal =
                 iolist_to_binary(
@@ -176,6 +177,5 @@ common_config() ->
                 http_logdir,
                 app_helper:get_env(riak_core, platform_log_dir, "log")
             )},
-        {backlog, 128},
-        {dispatch, [{[], riak_api_wm_urlmap, []}]}
+        {backlog, 128}
     ].
