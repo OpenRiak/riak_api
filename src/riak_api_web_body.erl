@@ -46,8 +46,10 @@
     % called when the chunk_buff is greater than or equal to the slice
     % length
     transfer_complete = false :: boolean(),
+
+    spoof_socket = false :: boolean(),
     test_packets = [] :: list(binary())
-    % only used in tests
+        % only used in tests
 }).
 
 -type req_body() :: #req_body{}.
@@ -252,8 +254,17 @@ get_chunk_size(Line) ->
             binary_to_integer(ChunkLength, 16)
     end.
 
--ifdef(TEST).
-extend_buffer(ReqBody, Size, _Timeout) ->
+-spec extend_buffer(
+    req_body(),
+    pos_integer() | line,
+    non_neg_integer() | undefined
+) ->
+    req_body().
+extend_buffer(#req_body{buffer_fun = BufferFun, spoof_socket = false} = ReqBody, Size, Timeout) ->
+    ReqBody#req_body{
+        buffer = BufferFun(ReqBody#req_body.buffer, Size, Timeout)
+    };
+extend_buffer(#req_body{spoof_socket = true} = ReqBody, Size, _Timeout) ->
     {NextBin, RestPackets} =
         accrue_packets(
             ReqBody#req_body.test_packets,
@@ -261,18 +272,31 @@ extend_buffer(ReqBody, Size, _Timeout) ->
             ReqBody#req_body.buffer
         ),
     ReqBody#req_body{buffer = NextBin, test_packets = RestPackets}.
--else.
--spec extend_buffer(
-    req_body(),
-    pos_integer() | line,
-    non_neg_integer() | undefined
-) ->
-    req_body().
-extend_buffer(#req_body{buffer_fun = BufferFun} = ReqBody, Size, Timeout) ->
-    ReqBody#req_body{
-        buffer = BufferFun(ReqBody#req_body.buffer, Size, Timeout)
-    }.
--endif.
+
+%% @doc accrue_packets for unit tests only, when #req_body{spoof_socket = true}
+accrue_packets(Rest, 0, Buffer) ->
+    {Buffer, Rest};
+accrue_packets([], line, Buffer) ->
+    {Buffer, []};
+accrue_packets([NextPacket | Rest], line, Buffer) ->
+    case erlang:decode_packet(line, NextPacket, []) of
+        {ok, Line, Overhang} ->
+            {<<Buffer/binary, Line/binary>>, [Overhang | Rest]};
+        {more, _} ->
+            accrue_packets(Rest, line, <<Buffer/binary, NextPacket/binary>>)
+    end;
+accrue_packets([NextPacket | Rest], Size, Buffer) when is_integer(Size) ->
+    case Size of
+        Needed when Needed < byte_size(NextPacket) ->
+            <<PartPacket:Needed/binary, RestPacket/binary>> = NextPacket,
+            {<<Buffer/binary, PartPacket/binary>>, [RestPacket | Rest]};
+        Needed ->
+            accrue_packets(
+                Rest,
+                Needed - byte_size(NextPacket),
+                <<Buffer/binary, NextPacket/binary>>
+            )
+    end.
 
 %%%============================================================================
 %%% Eunit tests
@@ -291,6 +315,7 @@ slicing_fixed_length_test() ->
             buffer = <<>>,
             content_length = 11 * 1024,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = Packets
         },
     {Slice1, RqBdy1} = get_body(RqBdyInit, 4 * 1024, 60 * 1000),
@@ -319,6 +344,7 @@ slicing_fixed_length_test() ->
             buffer = OnBuffer,
             content_length = 11 * 1024,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = [OnSocket | RestPackets] ++ [DummyRequest]
         },
     {SliceAlt1, RqBdyAlt1} = get_body(RqBdyAlt0, 4 * 1024, 60 * 1000),
@@ -343,6 +369,7 @@ all_in_buffer_test() ->
             buffer = Body,
             content_length = 11 * 1024,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = []
         },
     {Slice1, RqBdy1} = get_body(RqBdyInit, 4 * 1024, 60 * 1000),
@@ -362,6 +389,7 @@ get_empty_body_test() ->
             buffer = <<"0\r\n\r\n">>,
             content_length = chunked,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = []
         },
     {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
@@ -397,6 +425,7 @@ get_standard_wikipedia_test() ->
             buffer = <<"">>,
             content_length = chunked,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = Packets
         },
     {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
@@ -420,6 +449,7 @@ get_standard_wikipedia_inslices_test() ->
             buffer = <<"">>,
             content_length = chunked,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = Packets
         },
     {Slice1, RqBdy1} = get_body(RqBdyInit, 5, 1000),
@@ -441,7 +471,8 @@ get_wikipedia_from_buffer_test() ->
             1024 * 1024
         ),
     OtherPackets = [<<"0\r\n">>, <<"\r\n">>],
-    RqBdy = RqBdyInit#req_body{test_packets = OtherPackets},
+    RqBdy =
+        RqBdyInit#req_body{spoof_socket = true, test_packets = OtherPackets},
     {Output, RqBdyEnd} = get_body(RqBdy, all, 1000),
     ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
     ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
@@ -466,6 +497,7 @@ ignore_extension_test() ->
             buffer = <<>>,
             content_length = chunked,
             max_size = 1024 * 1024,
+            spoof_socket = true,
             test_packets = Packets
         },
     {Output, RqBdyEnd} = get_body(RqBdyInit, all, 1000),
@@ -489,6 +521,7 @@ toobig_chunking_test() ->
             buffer = <<"">>,
             content_length = chunked,
             max_size = 20,
+            spoof_socket = true,
             test_packets = Packets
         },
     ?assertMatch({error, content_too_large}, get_body(RqBdyInit, all, 1000)).
@@ -497,29 +530,5 @@ packet_testbin(<<>>, Acc) ->
     lists:reverse(Acc);
 packet_testbin(<<Bin:1024/binary, Rest/binary>>, Acc) ->
     packet_testbin(Rest, [Bin | Acc]).
-
-accrue_packets(Rest, 0, Buffer) ->
-    {Buffer, Rest};
-accrue_packets([], line, Buffer) ->
-    {Buffer, []};
-accrue_packets([NextPacket | Rest], line, Buffer) ->
-    case erlang:decode_packet(line, NextPacket, []) of
-        {ok, Line, Overhang} ->
-            {<<Buffer/binary, Line/binary>>, [Overhang | Rest]};
-        {more, _} ->
-            accrue_packets(Rest, line, <<Buffer/binary, NextPacket/binary>>)
-    end;
-accrue_packets([NextPacket | Rest], Size, Buffer) when is_integer(Size) ->
-    case Size of
-        Needed when Needed < byte_size(NextPacket) ->
-            <<PartPacket:Needed/binary, RestPacket/binary>> = NextPacket,
-            {<<Buffer/binary, PartPacket/binary>>, [RestPacket | Rest]};
-        Needed ->
-            accrue_packets(
-                Rest,
-                Needed - byte_size(NextPacket),
-                <<Buffer/binary, NextPacket/binary>>
-            )
-    end.
 
 -endif.

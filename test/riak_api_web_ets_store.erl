@@ -34,7 +34,8 @@
         parse_query_params/2,
         parse_request_headers/2,
         process_request/2,
-        record_request/3
+        record_request/3,
+        slice_stream_fun/1
     ]
 ).
 
@@ -48,13 +49,19 @@
 ).
 -endif.
 
+-define(SLICE_SIZE, 10 * 1024).
+
 -record(context, {
     key :: unicode:chardata(),
     method :: 'GET' | 'PUT',
-    type :: object | file
+    type :: object | file,
+    slice_list = [] :: list({range(), guid()}),
+    last_slice_end = 0 :: non_neg_integer()
 }).
 
 -type context() :: #context{}.
+-type guid() :: binary().
+-type range() :: {non_neg_integer(), non_neg_integer()}.
 
 %% @doc match_route for the module
 -spec match_route(
@@ -65,7 +72,7 @@
     no_match
     | {method_not_allowed, list(riak_api_web_acceptor:method())}
     | {ok, context(), riak_api_web_handler:limits()}.
-match_route(Method, _P, [<<>>, <<"ets_store">>, <<"key">>, Key]) when
+match_route(Method, _P, [<<>>, <<"ets_object">>, <<"key">>, Key]) when
     Method == 'GET'; Method == 'PUT'
 ->
     {
@@ -73,8 +80,14 @@ match_route(Method, _P, [<<>>, <<"ets_store">>, <<"key">>, Key]) when
         #context{key = Key, method = Method, type = object},
         {10, 1024, 16 * 1024}
     };
-match_route(_, _, [<<>>, <<"ets_store">>, <<"key">>, _Key]) ->
+match_route(_, _, [<<>>, <<"ets_object">>, <<"key">>, _Key]) ->
     {method_not_allowed, ['GET', 'PUT']};
+match_route(Method, _P, [<<>>, <<"ets_file">>, <<"filename">>, Key]) when Method == 'GET'; Method == 'PUT' ->
+    {
+        ok,
+        #context{key = Key, method = Method, type = file},
+        {10, 1024, 1024 * 1024}
+    };
 match_route(_, _, _) ->
     no_match.
 
@@ -126,8 +139,8 @@ parse_request_headers(Ctx, _ReqHeaders) ->
 process_request(
     Ctx = #context{key = Key, method = 'GET', type = object}, RqBdy
 ) ->
-    case ets:lookup(?MODULE, Key) of
-        [{Key, Value}] ->
+    case ets:lookup(?MODULE, {object, Key}) of
+        [{{object, Key}, Value}] ->
             {ok, Ctx, {200, [], Value, true, RqBdy}};
         [] ->
             {ok, Ctx, {404, [], <<>>, true, RqBdy}}
@@ -137,11 +150,80 @@ process_request(
 ) ->
     case riak_api_web_body:get_body(RqBdy, all, 10000) of
         {Value, UpdRqBdy} when is_binary(Value) ->
-            ets:insert(?MODULE, {Key, Value}),
+            ets:insert(?MODULE, {{object, Key}, Value}),
             ETag = base64:encode(crypto:hash(md5, Value), #{mode => urlsafe}),
             {ok, Ctx, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}};
         {error, content_too_large} ->
             {ok, Ctx, {413, [], <<>>, false, RqBdy}}
+    end;
+process_request(
+    Ctx = #context{key = Key, method = 'GET', type = file}, RqBdy
+) ->
+    case ets:lookup(?MODULE, {file, Key}) of
+        [{{file, Key}, SliceList}] ->
+            io:format(user, "Streaming ~w slices~n", [length(SliceList)]),
+            {
+                ok,
+                Ctx,
+                {
+                    200,
+                    [],
+                    {stream, slice_stream_fun(lists:sort(SliceList))},
+                    true,
+                    RqBdy
+                }
+            };
+        [] ->
+            {ok, Ctx, {404, [], <<>>, true, RqBdy}}
+    end;
+process_request(
+    Ctx = #context{key = Key, method = 'PUT', type = file}, RqBdy
+) ->
+    case riak_api_web_body:get_body(RqBdy, ?SLICE_SIZE, 10000) of
+        {Slice, UpdRqBdy} when is_binary(Slice) ->
+            SliceKey = generate_uuid(),
+            SliceSize = byte_size(Slice),
+            ets:insert_new(?MODULE, {{slice, SliceKey}, Slice}),
+            process_request(
+                Ctx#context{
+                    slice_list =
+                        [
+                            {
+                                {Ctx#context.last_slice_end, SliceSize},
+                                SliceKey
+                            } | Ctx#context.slice_list
+                        ],
+                    last_slice_end = Ctx#context.last_slice_end + SliceSize
+                },
+                UpdRqBdy
+            );
+        {done, UpdRqBdy} ->
+            ets:insert(?MODULE, {{file, Key}, Ctx#context.slice_list}),
+            ETag =
+                base64:encode(
+                    crypto:hash(md5, term_to_binary(Ctx#context.slice_list)),
+                    #{mode => urlsafe}
+                ),
+            {ok, Ctx, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}};
+        {error, content_too_large} ->
+            {ok, Ctx, {413, [], <<>>, false, RqBdy}}
+    end.
+
+generate_uuid() ->
+    <<A:32, B:16, C:16, D:16, E:48>> = crypto:strong_rand_bytes(16),
+    L = io_lib:format(
+        "~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
+        [A, B, C band 16#0fff, D band 16#3fff bor 16#8000, E]
+    ),
+    list_to_binary(L).
+
+slice_stream_fun([]) ->
+    fun() -> done end;
+slice_stream_fun(List) ->
+    fun() ->
+        [{_Range, SliceKey} | Rest] = List,
+        [{{slice, SliceKey}, Slice}] = ets:lookup(?MODULE, {slice, SliceKey}),
+        {Slice, slice_stream_fun(Rest)}
     end.
 
 %% @doc Record the output of the interaction
@@ -195,7 +277,8 @@ generator({_SpecName, IPAddr, Port}) ->
     [
         put_then_get(IPAddr, Port),
         put_too_big(IPAddr, Port),
-        put_big_header(IPAddr, Port)
+        put_big_header(IPAddr, Port),
+        put_then_get_big_file(IPAddr, Port)
     ].
 
 cleanup({SpecName, _IPAddr, _Port}) ->
@@ -204,13 +287,47 @@ cleanup({SpecName, _IPAddr, _Port}) ->
     riak_api_web_socket:stop(SpecName),
     ok.
 
+put_then_get_big_file({A, B, C, D}, Port) ->
+    fun() ->
+        Key = <<"K0004">>,
+        URI =
+            lists:flatten(
+                io_lib:format(
+                    "http://~w.~w.~w.~w:~w/ets_file/filename/~s",
+                    [A, B, C, D, Port, Key]
+                )
+            ),
+        Value = crypto:strong_rand_bytes(100 * 1024),
+        Hash = crypto:hash(md5, Value),
+        {ok, {{"HTTP/1.1", 204, "No Content"}, _Headers, <<>>}} =
+            httpc:request(
+                put,
+                {URI, [], "application/binary", Value},
+                [],
+                [{body_format, binary}],
+                test_client
+            ),
+        {ok, {{"HTTP/1.1", 200, "OK"}, _FetchHeaders, FetchBody}} =
+            httpc:request(
+                get,
+                {URI, []},
+                [],
+                [{body_format, binary}],
+                test_client
+            ),
+        ?assert(is_binary(FetchBody)),
+        ?assertMatch(102400, byte_size(FetchBody)),
+        ReturnedHash = crypto:hash(md5, FetchBody),
+        ?assertMatch(Hash, ReturnedHash)
+    end.
+
 put_then_get({A, B, C, D}, Port) ->
     fun() ->
         Key = <<"K0001">>,
         URI =
             lists:flatten(
                 io_lib:format(
-                    "http://~w.~w.~w.~w:~w/ets_store/key/~s",
+                    "http://~w.~w.~w.~w:~w/ets_object/key/~s",
                     [A, B, C, D, Port, Key]
                 )
             ),
@@ -264,7 +381,7 @@ put_too_big({A, B, C, D}, Port) ->
         URI =
             lists:flatten(
                 io_lib:format(
-                    "http://~w.~w.~w.~w:~w/ets_store/key/~s",
+                    "http://~w.~w.~w.~w:~w/ets_object/key/~s",
                     [A, B, C, D, Port, Key]
                 )
             ),
@@ -285,7 +402,7 @@ put_big_header({A, B, C, D}, Port) ->
         URI =
             lists:flatten(
                 io_lib:format(
-                    "http://~w.~w.~w.~w:~w/ets_store/key/~s",
+                    "http://~w.~w.~w.~w:~w/ets_object/key/~s",
                     [A, B, C, D, Port, Key]
                 )
             ),
