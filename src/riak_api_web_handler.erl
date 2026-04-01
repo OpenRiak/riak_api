@@ -63,16 +63,16 @@
 
 %% @doc match_route for the module
 %% When called each route handled by this module must be checked, and either
-%% `no_match` returned should none match - or the initial context with the
+%% `nomatch` returned should none match - or the initial context with the
 %% limits for that route.
 -callback match_route(
     riak_api_web_acceptor:method(),
     unicode:chardata(),
     list(unicode:chardata())
 ) -> 
-    no_match |
+    nomatch |
     {method_not_allowed, list(riak_api_web_acceptor:method())} |
-    {ok, context(), limits()}.
+    {ok, limits(), context()}.
 
 -type peer() :: inet:ip_address().
     %% The IP address of the client device connected to the socket
@@ -85,10 +85,10 @@
 %% On failure return a halt_response with e.g. 401 /403 response codes
 -callback
     check_permissions(
-        context(),
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
-        peer()
+        peer(),
+        context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
@@ -100,16 +100,16 @@
 %% parameter had no value - in which case the value will be the atom `true`
 -callback 
     parse_query_params(
-        context(),
-        query_params()
+        query_params(),
+        context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
 %% @doc parse and validate the request headers
 -callback 
     parse_request_headers(
-        context(),
-        riak_api_web_headers:headers()
+        riak_api_web_headers:headers(),
+        context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
@@ -153,19 +153,19 @@
 %% the buffer is available to the acceptor. 
 -callback
     process_request(
-        context(),
-        riak_api_web_body:req_body()
+        riak_api_web_body:req_body(),
+        context()
     ) ->
         {
             ok,
-            context(),
             {
                 riak_api_web_acceptor:response_code(),
                 riak_api_web_headers:header_list(),
                 response_body(),
                 boolean(),
                 riak_api_web_body:req_body()
-            }
+            },
+            context()
         } | riak_api_web_acceptor:halt_response().
 
 -type timings() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
@@ -179,4 +179,4 @@
     % was the output sent chunk encoded, or sent as a whole body
 
 %% @doc Record the output of the interaction
--callback record_request(context(), timings(), completion()) -> ok.
+-callback record_request(timings(), completion(), context()) -> ok.

@@ -148,8 +148,8 @@ handle_request(Socket, InitBuffer) ->
             {
                 ok,
                 CallbackMod,
-                InitModCtx,
-                {MaxHdrCount, MaxHdrSize, MaxBodySize}
+                {MaxHdrCount, MaxHdrSize, MaxBodySize},
+                InitModCtx
             } ?=
                 riak_api_web:get_route(Method, Path, SplitPath),
             {ok, ReqHeaders, BdyBuffer} ?=
@@ -160,15 +160,15 @@ handle_request(Socket, InitBuffer) ->
                 ),
             {ok, ModCtx1} ?=
                 CallbackMod:check_permissions(
-                    InitModCtx,
                     ReqHeaders,
                     element(1, Socket),
-                    Peer
+                    Peer,
+                    InitModCtx
                 ),
             {ok, ModCtx2} ?=
-                CallbackMod:parse_query_params(ModCtx1, QueryParams),
+                CallbackMod:parse_query_params(QueryParams, ModCtx1),
             {ok, ModCtx3} ?=
-                CallbackMod:parse_request_headers(ModCtx2, ReqHeaders),
+                CallbackMod:parse_request_headers(ReqHeaders, ModCtx2),
             {ok, {CLorChunk, UseGzip}} ?= expect_body(ReqHeaders),
             {ok, InitReqBdy} ?=
                 riak_api_web_body:initiate_body(
@@ -179,10 +179,10 @@ handle_request(Socket, InitBuffer) ->
                     MaxBodySize
                 ),
             ok ?= send_continue(Socket, ReqHeaders),
-            {ok, ModCtx4, {Code, RspHeaders, RspBody, KeepAliveOK, ReqBdy1}} ?=
+            {ok, {Code, RspHeaders, RspBody, KeepAliveOK, ReqBdy1}, ModCtx4} ?=
                 CallbackMod:process_request(
-                    ModCtx3,
-                    InitReqBdy
+                    InitReqBdy,
+                    ModCtx3
                 ),
             Keepalive =
                 request_prefers_keepalive(Version, ReqHeaders) andalso
@@ -509,9 +509,9 @@ handle_response(
     ResponseCompleteTime = os:system_time(microsecond),
     ok =
         CallbackMod:record_request(
-            Context,
             {StartTime, RequestCompleteTime, ResponseCompleteTime},
-            stream_complete
+            stream_complete,
+            Context
         ),
     {Keepalive, BufferIn};
 handle_response(
@@ -532,9 +532,9 @@ handle_response(
     ResponseCompleteTime = os:system_time(microsecond),
     ok =
         CallbackMod:record_request(
-            Context,
             {StartTime, RequestCompleteTime, ResponseCompleteTime},
-            send_complete
+            send_complete,
+            Context
         ),
     {Keepalive, BufferIn};
 handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->

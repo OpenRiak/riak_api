@@ -66,44 +66,44 @@
     unicode:chardata(),
     list(unicode:chardata())
 ) -> 
-    no_match |
+    nomatch |
     {method_not_allowed, list(riak_api_web_acceptor:method())} |
-    {ok, context(), riak_api_web_handler:limits()}.
+    {ok, riak_api_web_handler:limits(), context()}.
 match_route('GET', <<"/random_data">>, _SP) ->
-    {ok, #context{}, {10, 1024, 128 * 1024}};
+    {ok, {10, 1024, 128 * 1024}, #context{}};
 match_route(_, <<"/random_data">>, _SP) ->
     {method_not_allowed, ['GET']};
 match_route(_, _, _) ->
-    no_match.
+    nomatch.
 
 %% @doc check_permissions for using this module or route
 -spec
     check_permissions(
-        context(),
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
-        riak_api_web_handler:peer()
+        riak_api_web_handler:peer(),
+        context()
     ) -> 
         {ok, context()}.
-check_permissions(Ctx, _Hdrs, _Scheme, _Peer) ->
+check_permissions(_Hdrs, _Scheme, _Peer, Ctx) ->
     {ok, Ctx}.
 
 %% @doc parse and validate query params, passed as a map
 -spec
     parse_query_params(
-        context(),
-        riak_api_web_handler:query_params()
+        riak_api_web_handler:query_params(),
+        context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
-parse_query_params(#context{required_size = undefined}, []) ->
+parse_query_params([], #context{required_size = undefined}) ->
     {halt, 400, [], <<"no required_size parameter">>, []};
-parse_query_params(Ctx, []) ->
+parse_query_params([], Ctx) ->
     {ok, Ctx};
-parse_query_params(Ctx, [{<<"required_size">>, RS}|Rest]) ->
+parse_query_params([{<<"required_size">>, RS}|Rest], Ctx) ->
     try
         case binary_to_integer(RS) of
             RSI when is_integer(RSI), RSI >= 0 ->
-                parse_query_params(Ctx#context{required_size = RSI}, Rest);
+                parse_query_params(Rest, Ctx#context{required_size = RSI});
             _BadRS ->
                 {halt, 400, [], <<"invalid required_size ~0p">>, [RS]}
         end
@@ -111,17 +111,17 @@ parse_query_params(Ctx, [{<<"required_size">>, RS}|Rest]) ->
         _ : _ ->
             {halt, 400, [], <<"invalid required_size ~0p">>, [RS]}
     end;
-parse_query_params(Ctx,[_Other|Rest]) ->
-    parse_query_params(Ctx, Rest).
+parse_query_params([_Other|Rest], Ctx) ->
+    parse_query_params(Rest, Ctx).
 
 %% @doc parse and validate the request headers
 -spec
     parse_request_headers(
-        context(),
-        riak_api_web_headers:headers()
+        riak_api_web_headers:headers(),
+        context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
-parse_request_headers(Ctx, ReqHeaders) ->
+parse_request_headers(ReqHeaders, Ctx) ->
     case riak_api_web_headers:lookup(?ID_HEADER_LWR, ReqHeaders, true) of
         undefined ->
             ErrorMsg = <<"request requires x-riak-request_id header">>,
@@ -144,39 +144,39 @@ parse_request_headers(Ctx, ReqHeaders) ->
 %% @doc Process the request and produce a response
 -spec
     process_request(
-        context(),
-        riak_api_web_body:req_body()
+        riak_api_web_body:req_body(),
+        context()
     ) ->
         {
             ok,
-            context(),
             {
                 riak_api_web_acceptor:response_code(),
                 riak_api_web_headers:header_list(),
                 riak_api_web_handler:response_body(),
                 boolean(),
                 riak_api_web_body:req_body()
-            }
+            },
+            context()
         }.
-process_request(Ctx = #context{request_id = RqID, required_size = RS}, RqBdy)
+process_request(RqBdy, Ctx = #context{request_id = RqID, required_size = RS})
         when is_integer(RqID), is_integer(RS), RS > 0 ->
     Body = crypto:strong_rand_bytes(RS),
     RspHdr =
         {<<"X-Riak-request_id">>, integer_to_binary(RqID)},
     {
         ok,
-        Ctx,
-        {200, [RspHdr], Body, true, RqBdy}
+        {200, [RspHdr], Body, true, RqBdy},
+        Ctx
     }.
 
 %% @doc Record the output of the interaction
 -spec record_request(
-    context(),
     riak_api_web_handler:timings(),
-    riak_api_web_handler:completion()
+    riak_api_web_handler:completion(),
+    context()
 ) -> 
     ok.
-record_request(_Ctx, Timings, Completion) ->
+record_request(Timings, Completion, _Ctx) ->
     {A, B, C} = Timings,
     io:format(
         user,

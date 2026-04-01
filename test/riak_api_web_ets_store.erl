@@ -69,16 +69,16 @@
     unicode:chardata(),
     list(unicode:chardata())
 ) ->
-    no_match
+    nomatch
     | {method_not_allowed, list(riak_api_web_acceptor:method())}
-    | {ok, context(), riak_api_web_handler:limits()}.
+    | {ok, riak_api_web_handler:limits(), context()}.
 match_route(Method, _P, [<<"ets_object">>, <<"key">>, Key]) when
     Method == 'GET'; Method == 'PUT'
 ->
     {
         ok,
-        #context{key = Key, method = Method, type = object},
-        {10, 1024, 16 * 1024}
+        {10, 1024, 16 * 1024},
+        #context{key = Key, method = Method, type = object}
     };
 match_route(_, _, [<<"ets_object">>, <<"key">>, _Key]) ->
     {method_not_allowed, ['GET', 'PUT']};
@@ -87,98 +87,98 @@ match_route(Method, _P, [<<"ets_file">>, <<"filename">>, Key]) when
 ->
     {
         ok,
-        #context{key = Key, method = Method, type = file},
-        {10, 1024, 1024 * 1024}
+        {10, 1024, 1024 * 1024},
+        #context{key = Key, method = Method, type = object}
     };
 match_route(_, _, _) ->
-    no_match.
+    nomatch.
 
 %% @doc check_permissions for using this module or route
 -spec check_permissions(
-    context(),
     riak_api_web_headers:headers(),
     riak_api_web_socket:scheme(),
-    riak_api_web_handler:peer()
+    riak_api_web_handler:peer(),
+    context()
 ) ->
     {ok, context()}.
-check_permissions(Ctx, _Hdrs, _Scheme, _Peer) ->
+check_permissions(_Hdrs, _Scheme, _Peer, Ctx) ->
     {ok, Ctx}.
 
 %% @doc parse and validate query params, passed as a map
 -spec parse_query_params(
-    context(),
-    riak_api_web_handler:query_params()
+    riak_api_web_handler:query_params(),
+    context()
 ) ->
     {ok, context()} | riak_api_web_acceptor:halt_response().
-parse_query_params(Ctx, _Params) ->
+parse_query_params(_Params, Ctx) ->
     {ok, Ctx}.
 
 %% @doc parse and validate the request headers
 -spec parse_request_headers(
-    context(),
-    riak_api_web_headers:headers()
+    riak_api_web_headers:headers(),
+    context()
 ) ->
     {ok, context()} | riak_api_web_acceptor:halt_response().
-parse_request_headers(Ctx, _ReqHeaders) ->
+parse_request_headers(_ReqHeaders, Ctx) ->
     {ok, Ctx}.
 
 %% @doc Process the request and produce a response
 -spec process_request(
-    context(),
-    riak_api_web_body:req_body()
+    riak_api_web_body:req_body(),
+    context()
 ) ->
     {
         ok,
-        context(),
         {
             riak_api_web_acceptor:response_code(),
             riak_api_web_headers:header_list(),
             riak_api_web_handler:response_body(),
             boolean(),
             riak_api_web_body:req_body()
-        }
+        },
+        context()
     }.
 process_request(
-    Ctx = #context{key = Key, method = 'GET', type = object}, RqBdy
+    RqBdy, Ctx = #context{key = Key, method = 'GET', type = object}
 ) ->
     case ets:lookup(?MODULE, {object, Key}) of
         [{{object, Key}, Value}] ->
-            {ok, Ctx, {200, [], Value, true, RqBdy}};
+            {ok, {200, [], Value, true, RqBdy}, Ctx};
         [] ->
-            {ok, Ctx, {404, [], <<>>, true, RqBdy}}
+            {ok, {404, [], <<>>, true, RqBdy}, Ctx}
     end;
 process_request(
-    Ctx = #context{key = Key, method = 'PUT', type = object}, RqBdy
+    RqBdy, Ctx = #context{key = Key, method = 'PUT', type = object}
 ) ->
     case riak_api_web_body:get_body(RqBdy, all, 10000) of
         {Value, UpdRqBdy} when is_binary(Value) ->
             ets:insert(?MODULE, {{object, Key}, Value}),
             ETag = base64:encode(crypto:hash(md5, Value), #{mode => urlsafe}),
-            {ok, Ctx, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}};
+            {ok, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}, Ctx};
         {error, content_too_large} ->
-            {ok, Ctx, {413, [], <<>>, false, RqBdy}}
+            {ok, {413, [], <<>>, false, RqBdy}, Ctx}
     end;
 process_request(
-    Ctx = #context{key = Key, method = 'GET', type = file}, RqBdy
+    RqBdy, Ctx = #context{key = Key, method = 'GET', type = file}
 ) ->
     case ets:lookup(?MODULE, {file, Key}) of
         [{{file, Key}, SliceList}] ->
             {
                 ok,
-                Ctx,
                 {
                     200,
                     [],
                     {stream, slice_stream_fun(lists:sort(SliceList))},
                     true,
                     RqBdy
-                }
+                },
+                Ctx
             };
         [] ->
-            {ok, Ctx, {404, [], <<>>, true, RqBdy}}
+            {ok, {404, [], <<>>, true, RqBdy}, Ctx}
     end;
 process_request(
-    Ctx = #context{key = Key, method = 'PUT', type = file}, RqBdy
+    RqBdy, Ctx = #context{key = Key, method = 'PUT', type = file}
 ) ->
     case riak_api_web_body:get_body(RqBdy, ?SLICE_SIZE, 10000) of
         {Slice, UpdRqBdy} when is_binary(Slice) ->
@@ -186,6 +186,7 @@ process_request(
             SliceSize = byte_size(Slice),
             ets:insert_new(?MODULE, {{slice, SliceKey}, Slice}),
             process_request(
+                UpdRqBdy,
                 Ctx#context{
                     slice_list =
                         [
@@ -196,8 +197,7 @@ process_request(
                             | Ctx#context.slice_list
                         ],
                     last_slice_end = Ctx#context.last_slice_end + SliceSize
-                },
-                UpdRqBdy
+                }
             );
         {done, UpdRqBdy} ->
             ets:insert(?MODULE, {{file, Key}, Ctx#context.slice_list}),
@@ -206,9 +206,9 @@ process_request(
                     crypto:hash(md5, term_to_binary(Ctx#context.slice_list)),
                     #{mode => urlsafe}
                 ),
-            {ok, Ctx, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}};
+            {ok, {204, [{'Etag', ETag}], <<>>, true, UpdRqBdy}, Ctx};
         {error, content_too_large} ->
-            {ok, Ctx, {413, [], <<>>, false, RqBdy}}
+            {ok, {413, [], <<>>, false, RqBdy}, Ctx}
     end.
 
 generate_uuid() ->
@@ -230,12 +230,12 @@ slice_stream_fun(List) ->
 
 %% @doc Record the output of the interaction
 -spec record_request(
-    context(),
     riak_api_web_handler:timings(),
-    riak_api_web_handler:completion()
+    riak_api_web_handler:completion(),
+    context()
 ) ->
     ok.
-record_request(Ctx, Timings, Completion) ->
+record_request(Timings, Completion, Ctx) ->
     {A, B, C} = Timings,
     io:format(
         user,

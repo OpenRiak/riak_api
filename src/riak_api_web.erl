@@ -54,8 +54,8 @@ add_routes(Routes) ->
     {
         ok,
         module(),
-        any(),
-        {pos_integer(), pos_integer(), pos_integer()}
+        {pos_integer(), pos_integer(), pos_integer()},
+        any()
     }
     | riak_api_web_acceptor:halt_response().
 get_route(Method, Path, SplitPath) ->
@@ -66,7 +66,7 @@ get_route([], _Method, _Path, _SP) ->
     {halt, 404, [], <<>>, []};
 get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
     case CallbackMod:match_route(Method, Path, SplitPath) of
-        no_match ->
+        nomatch ->
             get_route(Rest, Method, Path, SplitPath);
         {method_not_allowed, AllowedMethods} ->
             AllowHdrVal =
@@ -77,8 +77,8 @@ get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
                     )
                 ),
             {halt, 405, [{'Allow', AllowHdrVal}], <<>>, []};
-        {ok, Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}} ->
-            {ok, CallbackMod, Context, {MaxHdrCount, MaxHdrSize, MaxBodySize}}
+        {ok, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context} ->
+            {ok, CallbackMod, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context}
     end.
 
 get_listeners() ->
