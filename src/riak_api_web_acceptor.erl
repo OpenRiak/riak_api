@@ -257,7 +257,13 @@ split_path(URIPath) ->
     case uri_string:normalize(URIPath, [return_map]) of
         URIMap when is_map(URIMap) ->
             Path = maps:get(path, URIMap, <<"">>),
-            SplitPath = string:split(Path, <<"/">>, all),
+            SplitPath =
+                case string:split(Path, <<"/">>, all) of
+                    [<<>>|Rest] ->
+                        Rest;
+                    PathList when is_list(PathList) ->
+                        PathList
+                end,
             case uri_string:dissect_query(maps:get(query, URIMap, <<"">>)) of
                 QueryParams when is_list(QueryParams) ->
                     {ok, {Path, SplitPath, QueryParams}};

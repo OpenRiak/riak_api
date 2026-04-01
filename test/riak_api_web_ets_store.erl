@@ -72,7 +72,7 @@
     no_match
     | {method_not_allowed, list(riak_api_web_acceptor:method())}
     | {ok, context(), riak_api_web_handler:limits()}.
-match_route(Method, _P, [<<>>, <<"ets_object">>, <<"key">>, Key]) when
+match_route(Method, _P, [<<"ets_object">>, <<"key">>, Key]) when
     Method == 'GET'; Method == 'PUT'
 ->
     {
@@ -80,9 +80,9 @@ match_route(Method, _P, [<<>>, <<"ets_object">>, <<"key">>, Key]) when
         #context{key = Key, method = Method, type = object},
         {10, 1024, 16 * 1024}
     };
-match_route(_, _, [<<>>, <<"ets_object">>, <<"key">>, _Key]) ->
+match_route(_, _, [<<"ets_object">>, <<"key">>, _Key]) ->
     {method_not_allowed, ['GET', 'PUT']};
-match_route(Method, _P, [<<>>, <<"ets_file">>, <<"filename">>, Key]) when
+match_route(Method, _P, [<<"ets_file">>, <<"filename">>, Key]) when
     Method == 'GET'; Method == 'PUT'
 ->
     {
