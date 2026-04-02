@@ -64,8 +64,7 @@
         init/1,
         handle_call/3,
         handle_cast/2,
-        handle_info/2,
-        terminate/2
+        handle_info/2
     ]
 ).
 
@@ -229,12 +228,12 @@ init(Options) ->
         end,
     SocketOpts = default_socket_options(IP),
     {ok, Listener} = listen(Protocol, Port, SocketOpts, BufferOpts, SSLOpts),
-    riak_api_web_acceptor:start_clock(),
     {AcceptorPool, StartSize, MaxSize} = get_acceptor_pool(Listener, Options),
     ?LOG_INFO(
         "Acceptor pool for web started on IP ~0p port ~w of size ~w",
         [IP, Port, StartSize]
     ),
+    riak_api_web:cache_today(),
     {
         ok,
         #socket_state{
@@ -300,10 +299,6 @@ handle_info({'EXIT', Pid, normal}, State) ->
 handle_info({'EXIT', Pid, Reason}, State) ->
     ?LOG_ERROR("Acceptor ~p unexpectedly crashed: ~0p", [Pid, Reason]),
     handle_info({'EXIT', Pid, normal}, State).
-
-terminate(_Reason, _State) ->
-    riak_api_web_acceptor:stop_clock(),
-    ok.
 
 %%%============================================================================
 %%% Internal Functions

@@ -28,7 +28,7 @@
 
 -export([start_link/1, init/2]).
 
--export([extend_buffer/4, start_clock/0, stop_clock/0]).
+-export([extend_buffer/4]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -673,35 +673,12 @@ get_response_line({1, 1}, Code) ->
         ]
     ).
 
--spec start_clock() -> ok.
-start_clock() ->
-    ?MODULE =
-        ets:new(
-            ?MODULE,
-            [named_table, public, {read_concurrency, true}]
-        ),
-    ok.
-
--spec stop_clock() -> true.
-stop_clock() ->
-    ets:delete(?MODULE).
-
 -spec default_response_headers(
     boolean()
 ) ->
     riak_api_web_headers:headers().
 default_response_headers(KeepAlive) ->
-    DateHeader =
-        case {os:system_time(second), ets:lookup(?MODULE, rfc1123)} of
-            {Now, [{rfc1123, {CachedTime, CachedHdr}}]} when
-                Now == CachedTime
-            ->
-                CachedHdr;
-            {Now, _} ->
-                Hdr = {'Date', list_to_binary(httpd_util:rfc1123_date())},
-                ets:insert(?MODULE, {rfc1123, {Now, Hdr}}),
-                Hdr
-        end,
+    DateHeader = {'Date', riak_api_web:rfc1123_date_now()},
     ServerHeader = {'Server', <<"RiakAPI/4.0 SilverMachine">>},
     ConnectionHeader =
         case KeepAlive of
@@ -732,7 +709,7 @@ reason_phrase(N) -> httpd_util:reason_phrase(N).
 -include_lib("eunit/include/eunit.hrl").
 
 clock_test() ->
-    ok = start_clock(),
+    ok = riak_api_web:cache_today(),
     {TC1, _Hdrs1} =
         timer:tc(fun() -> default_response_headers(true) end),
     {TC2, _Hdrs2} =
@@ -744,7 +721,6 @@ clock_test() ->
     timer:sleep(1000),
     {TC5, _Hdrs5} =
         timer:tc(fun() -> default_response_headers(true) end),
-    ?assertMatch(1, ets:info(?MODULE, size)),
     MeanUnCached = (TC1 + TC5) div 2,
     MeanCached = (TC2 + TC3 + TC4) div 3,
     io:format(
@@ -752,11 +728,10 @@ clock_test() ->
         "Cached ~w micros vs uncached ~w~n",
         [MeanCached, MeanUnCached]
     ),
-    ?assert(MeanCached < MeanUnCached),
-    ets:delete(?MODULE).
+    ?assert(MeanCached < MeanUnCached).
 
 simple_response_test() ->
-    ok = start_clock(),
+    ok = riak_api_web:cache_today(),
     set_version({1, 1}),
     FullResponse =
         generate_binary_response(
@@ -777,11 +752,10 @@ simple_response_test() ->
             <<"\r\n">>/binary,
             <<"OutputOK">>/binary
         >>,
-    ?assertMatch(ExpectedResponse, FullResponse),
-    ets:delete(?MODULE).
+    ?assertMatch(ExpectedResponse, FullResponse).
 
 simple_stream_test() ->
-    ok = start_clock(),
+    ok = riak_api_web:cache_today(),
     SendFun =
         fun(Bin) when is_binary(Bin) ->
             case get({?MODULE, ?TEST, send_buffer}) of
@@ -828,8 +802,7 @@ simple_stream_test() ->
                 "\r\nA\r\nin chunks!\r\n0\r\n\r\n"
             >>/binary
         >>,
-    ?assertMatch(ExpectedResponse, Response),
-    ets:delete(?MODULE).
+    ?assertMatch(ExpectedResponse, Response).
 
 stream_fun() ->
     fun() ->
