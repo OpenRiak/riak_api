@@ -33,7 +33,7 @@
     boolean(),
     http | https,
     riak_api_web_headers:headers(),
-    {ip, inet:ip_address()}
+    inet:ip_address()
 ) ->
     {ok, riak_core_security:context() | undefined}
     | riak_api_web_acceptor:halt_response().
@@ -43,7 +43,7 @@ is_authorised(Enabled, Scheme, ReqHeaders, Peer) ->
         Scheme,
         ReqHeaders,
         Peer,
-        fun(User, Pass, {ip, Pip}) ->
+        fun(User, Pass, Pip) ->
             riak_core_security:authenticate(User, Pass, [{ip, Pip}])
         end
     ).
