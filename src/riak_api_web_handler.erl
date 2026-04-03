@@ -93,7 +93,7 @@
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
 
--type query_params() :: [{binary(), binary()}].
+-type query_params() :: [{unicode:chardata(), unicode:chardata()|true}].
 
 %% @doc parse and validate query params, passed as a map
 %% Any parameter will have both key and value as a binary, except if the
