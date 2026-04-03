@@ -38,8 +38,6 @@
     ]
 ).
 
--include_lib("kernel/include/logger.hrl").
-
 -define(ROUTE_KEY, {?MODULE, web_routes}).
 
 -type route() :: {1..100, module()}.
@@ -99,21 +97,9 @@ get_listeners() ->
 get_listeners(Scheme) ->
     Listeners =
         case
-            app_helper:try_envs(
-                [
-                    {riak_api, Scheme},
-                    {riak_core, Scheme}
-                ],
-                []
-            )
+            app_helper:try_envs([{riak_api, Scheme}], [])
         of
             {riak_api, Scheme, List} when is_list(List) ->
-                List;
-            {riak_core, Scheme, List} when is_list(List) ->
-                ?LOG_WARNING(
-                    "Setting riak_core/~s is deprecated, please use riak_api/~s",
-                    [Scheme, Scheme]
-                ),
                 List;
             _ ->
                 []
@@ -135,39 +121,27 @@ binding_config(Scheme, Binding) ->
     }.
 
 spec_from_binding(http, Name, {Ip, Port}) ->
-    Options =
-        lists:flatten(
-            [
-                {name, Name},
-                {ip, Ip},
-                {port, Port},
-                {nodelay, true}
-            ],
-            common_config()
-        ),
-    add_recbuf(Options);
+    lists:flatten(
+        [
+            {name, Name},
+            {ip, Ip},
+            {port, Port},
+            {nodelay, true}
+        ],
+        common_config()
+    );
 spec_from_binding(https, Name, {Ip, Port}) ->
-    Options =
-        lists:flatten(
-            [
-                {name, Name},
-                {ip, Ip},
-                {port, Port},
-                {ssl, true},
-                {ssl_opts, riak_api_ssl:options()},
-                {nodelay, true}
-            ],
-            common_config()
-        ),
-    add_recbuf(Options).
-
-add_recbuf(Options) ->
-    case application:get_env(webmachine, recbuf) of
-        {ok, RecBuf} ->
-            [{recbuf, RecBuf} | Options];
-        _ ->
-            Options
-    end.
+    lists:flatten(
+        [
+            {name, Name},
+            {ip, Ip},
+            {port, Port},
+            {ssl, true},
+            {ssl_opts, riak_api_ssl:options()},
+            {nodelay, true}
+        ],
+        common_config()
+    ).
 
 spec_name(Scheme, Ip, Port) ->
     FormattedIP =

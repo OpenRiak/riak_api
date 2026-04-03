@@ -86,6 +86,9 @@
 
 -define(POOL_SIZE_DEFAULT, 16).
 -define(POOL_SIZE_MAX_DEFAULT, 2048).
+-define(DEFAULT_RECV_BUFFER, 131072).
+    % Setting the receive buffer will also change the buffer
+    % https://github.com/erlang/otp/issues/9355
 
 -record(socket_state, {
     port :: inet:port_number(),
@@ -208,7 +211,7 @@ init(Options) ->
     BufferOpts =
         case get_tcp_buffer_options() of
             [] ->
-                [];
+                [{recbuf, ?DEFAULT_RECV_BUFFER}];
             NonDefaultOpts ->
                 ?LOG_INFO(
                     "Non-default TCP buffer options configured for web ~0p",
