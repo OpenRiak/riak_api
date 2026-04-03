@@ -87,7 +87,7 @@
     check_permissions(
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
-        peer(),
+        peer_ip(),
         context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
