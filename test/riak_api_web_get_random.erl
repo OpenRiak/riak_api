@@ -81,7 +81,7 @@ match_route(_, _, _) ->
     check_permissions(
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
-        riak_api_web_handler:peer(),
+        riak_api_web_handler:peer_ip(),
         context()
     ) -> 
         {ok, context()}.

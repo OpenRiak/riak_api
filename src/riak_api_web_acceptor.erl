@@ -60,7 +60,7 @@
         response_code(),
         riak_api_web_headers:header_list(),
         binary(),
-        list()
+        list(term())
     }.
 
 -type halt_result() ::
@@ -140,7 +140,7 @@ handle_request(Socket, InitBuffer) ->
     reset_version(),
     RequestResult =
         maybe
-            {ok, Peer} = riak_api_web_socket:get_peer(Socket),
+            {ok, PeerIP} = riak_api_web_socket:get_peer(Socket),
             {ok, {Method, RawPath, Version, HdrBuffer}} ?=
                 get_request_line(Socket, InitBuffer),
             set_version(Version),
@@ -162,7 +162,7 @@ handle_request(Socket, InitBuffer) ->
                 CallbackMod:check_permissions(
                     ReqHeaders,
                     element(1, Socket),
-                    Peer,
+                    PeerIP,
                     InitModCtx
                 ),
             {ok, ModCtx2} ?=

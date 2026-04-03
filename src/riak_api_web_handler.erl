@@ -52,7 +52,7 @@
 -export_type(
     [
         limits/0,
-        peer/0,
+        peer_ip/0,
         query_params/0,
         stream_fun/0,
         response_body/0,
@@ -74,7 +74,7 @@
     {method_not_allowed, list(riak_api_web_acceptor:method())} |
     {ok, limits(), context()}.
 
--type peer() :: inet:ip_address().
+-type peer_ip() :: inet:ip_address().
     %% The IP address of the client device connected to the socket
 
 %% @doc check_permissions for using this module or route
