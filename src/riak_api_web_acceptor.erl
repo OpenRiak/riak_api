@@ -259,7 +259,7 @@ split_path(URIPath) ->
             Path = maps:get(path, URIMap, <<"">>),
             SplitPath =
                 case string:split(Path, <<"/">>, all) of
-                    [<<>>|Rest] ->
+                    [<<>> | Rest] ->
                         Rest;
                     PathList when is_list(PathList) ->
                         PathList

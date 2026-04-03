@@ -96,9 +96,7 @@ get_listeners() ->
 
 get_listeners(Scheme) ->
     Listeners =
-        case
-            app_helper:try_envs([{riak_api, Scheme}], [])
-        of
+        case app_helper:try_envs([{riak_api, Scheme}], []) of
             {riak_api, Scheme, List} when is_list(List) ->
                 List;
             _ ->
@@ -197,10 +195,10 @@ rfc1123_date(TS) ->
     {Date, Time} = calendar:now_to_universal_time(TS),
     rfc1123_date(Date, Time).
 
-rfc1123_date({YYYY,MM,DD},{Hr,Mn,Sc}) ->
+rfc1123_date({YYYY, MM, DD}, {Hr, Mn, Sc}) ->
     DateBin =
         <<
-            (day_bin(calendar:day_of_the_week({YYYY,MM,DD})))/binary,
+            (day_bin(calendar:day_of_the_week({YYYY, MM, DD})))/binary,
             (i2_bin(DD))/binary,
             (mon_bin(MM))/binary,
             (integer_to_binary(YYYY))/binary,
@@ -219,7 +217,7 @@ rfc1123_date(DateBin, {Hr, Mn, Sc}) when is_binary(DateBin) ->
     >>.
 
 i2_bin(I) when I < 10 ->
-    << $0, (integer_to_binary(I))/binary >>;
+    <<$0, (integer_to_binary(I))/binary>>;
 i2_bin(I) ->
     integer_to_binary(I).
 
@@ -263,7 +261,6 @@ mon_bin(11) ->
 mon_bin(12) ->
     <<" Dec ">>.
 
-
 %%%============================================================================
 %%% Eunit tests
 %%%============================================================================
@@ -304,7 +301,7 @@ date_speed_test() ->
         ),
     io:format(user, "Timing for ours ~w vs wm ~w~n", [TC1, TC2]),
     ?assert(DL1 == DL2),
-    
+
     PreCalcDates = lists:map(fun(<<D:17/binary, _/binary>>) -> D end, DL1),
     NewInputs = lists:zip(PreCalcDates, Dates),
     {TC3, DL3} =

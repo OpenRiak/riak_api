@@ -27,6 +27,7 @@
 -export([is_authorised/4]).
 
 -define(AUTH_PREFIX, "Basic ").
+-define(ERR_HEADER, {'Content-Type', <<"text/plain">>}).
 
 -spec is_authorised(
     boolean(),
@@ -57,21 +58,27 @@ is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
                     {ok, SecContext} ->
                         {ok, SecContext};
                     {error, Error} ->
-                        {halt, 401, <<"~0p">>, [Error]}
+                        {halt, 401, [?ERR_HEADER], <<"~0p">>, [Error]}
                 end
             catch
                 _:ExError ->
                     ?LOG_WARNING("Error decoding credentials ~0p", [ExError]),
-                    {halt, 400, [], <<"Error decoding credentials">>, []}
+                    {
+                        halt,
+                        400,
+                        [?ERR_HEADER],
+                        <<"Error decoding credentials">>,
+                        []
+                    }
             end;
         Unexpected ->
             ?LOG_WARNING("Error decoding credentials ~0p", [Unexpected]),
-            {halt, 400, [], <<"Error decoding credentials">>, []}
+            {halt, 400, [?ERR_HEADER], <<"Error decoding credentials">>, []}
     end;
 is_authorised(true, http, _ReqHeaders, _Peer, _AuthFun) ->
-    {halt, 426, [], <<"Upgrade required to https">>};
+    {halt, 426, [?ERR_HEADER], <<"Upgrade required to https">>, []};
 is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
-    {true, undefined}.
+    {ok, undefined}.
 
 %%%============================================================================
 %%% Eunit tests
@@ -109,7 +116,7 @@ simple_security_test() ->
         )
     ),
     ?assertMatch(
-        {halt, 400, [], <<"Error decoding credentials">>, []},
+        {halt, 400, [?ERR_HEADER], <<"Error decoding credentials">>, []},
         is_authorised(
             true,
             https,
@@ -120,7 +127,7 @@ simple_security_test() ->
     ),
     BadCombo = base64:encode(iolist_to_binary([User2, <<":">>, Pass1])),
     ?assertMatch(
-        {halt, 401, <<"~0p">>, [invalid_credentials]},
+        {halt, 401, [?ERR_HEADER], <<"~0p">>, [invalid_credentials]},
         is_authorised(
             true,
             https,
@@ -140,7 +147,7 @@ simple_security_test() ->
             ]
         ),
     ?assertMatch(
-        {halt, 400, [], <<"Error decoding credentials">>, []},
+        {halt, 400, [?ERR_HEADER], <<"Error decoding credentials">>, []},
         is_authorised(
             true,
             https,
