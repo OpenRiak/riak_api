@@ -219,7 +219,14 @@ init(Options) ->
                 ),
                 NonDefaultOpts
         end,
-    {ip, IP} = lists:keyfind(ip, 1, Options),
+    {ip, IP} =
+        case lists:keyfind(ip, 1, Options) of
+            {ip, IPString} when is_list(IPString) ->
+                {ok, IPAddr} = inet:parse_address(IPString),
+                {ip, IPAddr};
+            {ip, IPAddr} ->
+                {ip, IPAddr}
+        end,
     {port, Port} = lists:keyfind(port, 1, Options),
     {Protocol, SSLOpts} =
         case lists:keyfind(ssl, 1, Options) of

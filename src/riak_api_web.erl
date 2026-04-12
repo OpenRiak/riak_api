@@ -111,7 +111,7 @@ binding_config(Scheme, Binding) ->
 
     {
         Name,
-        {riak_api_web_socket, start, [Config]},
+        {riak_api_web_socket, start_link, [Config]},
         permanent,
         5000,
         worker,
