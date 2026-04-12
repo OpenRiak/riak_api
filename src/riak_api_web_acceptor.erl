@@ -49,7 +49,7 @@
     | 500..508.
 
 -type method() ::
-    'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE'.
+    'OPTIONS' | 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'TRACE'.
 
 -type http_version() ::
     {1, 0} | {1, 1}.
@@ -390,32 +390,23 @@ get_request_line(Socket, Buffer) ->
                 extend_buffer(Socket, Buffer, 0, undefined)
             );
         {ok, {http_request, Method, {abs_path, Path}, Version}, Rest} when
-            is_binary(Path)
+            is_binary(Path), is_atom(Method)
         ->
             case Version of
                 SV when SV == {1, 0}; SV == {1, 1} ->
-                    case Method of
-                        SM when
-                            SM == 'GET';
-                            SM == 'HEAD';
-                            SM == 'POST';
-                            SM == 'PUT';
-                            SM == 'DELETE'
-                        ->
-                            {ok, {SM, Path, SV, Rest}};
-                        _USM ->
-                            {halt, 405, [], <<>>, []}
-                    end;
+                    {ok, {Method, Path, SV, Rest}};
                 _USV ->
                     USVError = <<"Only HTTP 1.0 and 1.1 supported">>,
                     {halt, 505, [], USVError, []}
             end;
+        {ok, {http_request, Method, _, _}, _Rest} when is_atom(Method) ->
+            bad_request(<<"Absolute path required not full or relative">>, []);
         {ok, {http_error, Error}, _} ->
             bad_request(<<"HTTP error on inbound request ~0p">>, [Error]);
-        {ok, Unexpected, _} ->
+        {ok, _Unexpected, _} ->
             bad_request(
-                <<"Unexpected error on inbound request ~0p">>,
-                [Unexpected]
+                <<"Unexpected request line ~0p">>,
+                [Buffer]
             )
     end.
 
@@ -707,6 +698,60 @@ reason_phrase(N) -> httpd_util:reason_phrase(N).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+request_line_decode_test() ->
+    ?assertMatch(
+        {halt, 400, [], <<"Absolute path required not full or relative">>, []},
+        get_request_line(
+            test_socket,
+            <<"GET no-leading-slash/relative HTTP/1.1\r\n">>
+        )
+    ),
+    ?assertMatch(
+        {halt, 400, [], <<"Absolute path required not full or relative">>, []},
+        get_request_line(
+            test_socket,
+            <<"GET http://localhost:8000/full-path HTTP/1.1\r\n">>
+        )
+    ),
+    ?assertMatch(
+        {halt, 400, [], <<"Absolute path required not full or relative">>, []},
+        get_request_line(
+            test_socket,
+            <<"GET @ref HTTP/1.1\r\n">>
+        )
+    ),
+    ?assertMatch(
+        {
+            halt,
+            400,
+            [],
+            <<"HTTP error on inbound request ~0p">>,
+            [<<"GET @ref HTP/1.1\r\n">>]
+        },
+        get_request_line(
+            test_socket,
+            <<"GET @ref HTP/1.1\r\n">>
+        )
+    ),
+    ?assertMatch(
+        {halt, 505, [], <<"Only HTTP 1.0 and 1.1 supported">>, []},
+        get_request_line(test_socket, <<"GET /stats HTTP/2.0\r\n">>)
+    ),
+    % If the method is not supported at all, then give general error - as it is
+    % not possible to know what methods are allowed on the URL - this can only
+    % be determined when matching routes
+    ?assertMatch(
+        {
+            halt,
+            400,
+            [],
+            <<"Unexpected request line ~0p">>,
+            [<<"PATCH /stats HTTP/1.0\r\n">>]
+        },
+        get_request_line(test_socket, <<"PATCH /stats HTTP/1.0\r\n">>)
+    ).
 
 clock_test() ->
     ok = riak_api_web:cache_today(),
