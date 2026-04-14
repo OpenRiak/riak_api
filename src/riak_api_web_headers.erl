@@ -220,10 +220,7 @@ get_unique_value(K, H) ->
 %% secondary information is `;` separated list
 -spec parse_primary_header_value(binary()) -> unicode:chardata().
 parse_primary_header_value(HeaderValue) ->
-    string:trim(
-        hd(string:split(HeaderValue, [$;])),
-        both
-    ).
+    binary:split(HeaderValue, <<";">>, [global, trim_all]).
 
 %% @doc
 %% Fetch the {original key, values} for a binary (non-standard) header key.
@@ -404,7 +401,7 @@ normalize_value(MultipleValues) when is_list(MultipleValues) ->
 normalize_value(FieldValue) when is_binary(FieldValue) ->
     lists:map(
         fun(V) -> string:trim(V, both) end,
-        string:split(FieldValue, ?V_SEPARATOR, all)
+        binary:split(FieldValue, ?V_SEPARATOR, [global])
     ).
 
 %%%============================================================================
