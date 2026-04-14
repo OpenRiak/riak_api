@@ -40,6 +40,7 @@
 -define(KV_SEPARATOR, <<": ">>).
 -define(V_SEPARATOR, <<", ">>).
 -define(L_SEPARATOR, <<"\r\n">>).
+-define(OWS, [<<" ">>, <<"\t">>]).
 
 -record(headers, {
     type = request :: request | response,
@@ -400,9 +401,20 @@ normalize_key(KBin) when is_binary(KBin) ->
 normalize_value(MultipleValues) when is_list(MultipleValues) ->
     lists:filter(fun is_binary/1, MultipleValues);
 normalize_value(FieldValue) when is_binary(FieldValue) ->
-    CP = persistent_term:get({?MODULE, ?V_SEPARATOR}, ?V_SEPARATOR),
+    {CP, WS} =
+        persistent_term:get(
+            {?MODULE, ?V_SEPARATOR},
+            {?V_SEPARATOR, ?OWS}
+        ),
     lists:map(
-        fun(V) -> string:trim(V, leading) end,
+        fun(V) ->
+            case binary:split(V, WS, [global, trim_all]) of
+                [V0] when is_binary(V0) ->
+                    V0;
+                _ ->
+                    string:trim(V, both)
+            end
+        end,
         binary:split(FieldValue, CP, [global])
     ).
 
@@ -410,7 +422,8 @@ normalize_value(FieldValue) when is_binary(FieldValue) ->
 -spec compile_separator() -> ok.
 compile_separator() ->
     CP = binary:compile_pattern(?V_SEPARATOR),
-    persistent_term:put({?MODULE, ?V_SEPARATOR}, CP).
+    WS = binary:compile_pattern(?OWS),
+    persistent_term:put({?MODULE, ?V_SEPARATOR}, {CP, WS}).
 
 %%%============================================================================
 %%% Eunit tests
@@ -509,7 +522,7 @@ riak_metadata_test() ->
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1\r\n"
+            "x-riak-index-Field1_bin: NAME3|DOB1 \r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
         >>,
     RequestHeader2 =
@@ -541,7 +554,7 @@ content_smuggling_test() ->
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1\r\n"
+            "x-riak-index-Field1_bin: NAME3|DOB1 \t \r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
             "content-length: 16384\r\n"
             "\r\n"
