@@ -35,6 +35,7 @@
 -export([get_value/2, get_unique_value/2, lookup/3, prefix_fold/3]).
 -export([parse_primary_header_value/1]).
 -export([output_response_block/1, parse_request_block/3]).
+-export([compile_separator/0]).
 
 -define(KV_SEPARATOR, <<": ">>).
 -define(V_SEPARATOR, <<", ">>).
@@ -399,10 +400,17 @@ normalize_key(KBin) when is_binary(KBin) ->
 normalize_value(MultipleValues) when is_list(MultipleValues) ->
     lists:filter(fun is_binary/1, MultipleValues);
 normalize_value(FieldValue) when is_binary(FieldValue) ->
+    CP = persistent_term:get({?MODULE, ?V_SEPARATOR}, ?V_SEPARATOR),
     lists:map(
-        fun(V) -> string:trim(V, both) end,
-        binary:split(FieldValue, ?V_SEPARATOR, [global])
+        fun(V) -> string:trim(V, leading) end,
+        binary:split(FieldValue, CP, [global])
     ).
+
+%% @doc Call this function when initialising API
+-spec compile_separator() -> ok.
+compile_separator() ->
+    CP = binary:compile_pattern(?V_SEPARATOR),
+    persistent_term:put({?MODULE, ?V_SEPARATOR}, CP).
 
 %%%============================================================================
 %%% Eunit tests
@@ -411,12 +419,40 @@ normalize_value(FieldValue) when is_binary(FieldValue) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+split_perf_test() ->
+    HV1 = <<"SOME-INDEX|HEADER|NOTSPLIT">>,
+    HV2 = <<"HDR1, HDR2, HDR3">>,
+    L = [HV1, HV1, HV1, HV1, HV2],
+    FullL = lists:flatten(lists:map(fun(_I) -> L end, lists:seq(1, 1000))),
+    {TS1, L1} =
+        timer:tc(
+            fun() ->
+                lists:map(
+                    fun(HV) -> binary:split(HV, ?V_SEPARATOR, [global]) end,
+                    FullL
+                )
+            end
+        ),
+    CPVS = binary:compile_pattern(?V_SEPARATOR),
+    {TS2, L2} =
+        timer:tc(
+            fun() ->
+                lists:map(
+                    fun(HV) -> binary:split(HV, CPVS, [global]) end,
+                    FullL
+                )
+            end
+        ),
+    ?assertMatch(L1, L2),
+    io:format(user, "No-compile ~w compile ~w microseconds", [TS1, TS2]).
+
+
 parse_block_test() ->
     RequestHeader1 =
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1 \r\n"
+            "x-riak-index-Field1_bin:  NAME3|DOB1\r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
         >>,
     RequestHeader2 =
@@ -431,7 +467,7 @@ parse_splitblock_test() ->
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1 \r\n"
+            "x-riak-index-Field1_bin: NAME3|DOB1\r\n"
             "X-Riak-Index-field2_bin: POSTCODE1"
         >>,
     RequestHeader2 =
@@ -473,7 +509,7 @@ riak_metadata_test() ->
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1 \r\n"
+            "x-riak-index-Field1_bin: NAME3|DOB1\r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
         >>,
     RequestHeader2 =
@@ -505,7 +541,7 @@ content_smuggling_test() ->
         <<
             "content-length: 1024\r\n"
             "x-riak-Index-field1_bin:  NAME1|DOB1, NAME2|DOB1\r\n"
-            "x-riak-index-Field1_bin: NAME3|DOB1 \r\n"
+            "x-riak-index-Field1_bin: NAME3|DOB1\r\n"
             "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
             "content-length: 16384\r\n"
             "\r\n"
@@ -526,7 +562,7 @@ response_header_test() ->
             {<<"X-Riak-Index-field1_bin">>, [
                 <<"NAME1|DOB1">>, <<"NAME2|DOB1">>
             ]},
-            {<<"X-Riak-Index-field1_bin">>, <<"NAME3|DOB1 ">>},
+            {<<"X-Riak-Index-field1_bin">>, <<"NAME3|DOB1">>},
             {<<"X-Riak-Index-field2_bin">>, <<"POSTCODE1|DOB1">>}
         ],
     RespHeaders1 = make_rsp_header(InitHeaders),
