@@ -244,7 +244,8 @@ init(Options) ->
         [IP, Port, StartSize]
     ),
     riak_api_web:cache_today(),
-    riak_api_web_headers:compile_separator(),
+    riak_api_web_headers:compile_separators(),
+    riak_api_web_acceptor:compile_separators(),
     {
         ok,
         #socket_state{
