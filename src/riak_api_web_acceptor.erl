@@ -28,7 +28,7 @@
 
 -export([start_link/1, init/2]).
 
--export([extend_buffer/4, compile_separators/0]).
+-export([extend_buffer/4]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -257,12 +257,7 @@ split_path(URIPath) ->
     case uri_string:normalize(URIPath, [return_map]) of
         URIMap when is_map(URIMap) ->
             Path = maps:get(path, URIMap, <<"">>),
-            SplitPath =
-                binary:split(
-                    Path,
-                    persistent_term:get({?MODULE, separators}, <<"/">>),
-                    [global, trim_all]
-                ),
+            SplitPath = binary:split(Path, <<"/">>, [global, trim_all]),
             case uri_string:dissect_query(maps:get(query, URIMap, <<"">>)) of
                 QueryParams when is_list(QueryParams) ->
                     {ok, {Path, SplitPath, QueryParams}};
@@ -278,11 +273,6 @@ split_path(URIPath) ->
                 [NTerm, NReason]
             )
     end.
-
--spec compile_separators() -> ok.
-compile_separators() ->
-    SS = binary:compile_pattern(<<"/">>),
-    persistent_term:put({?MODULE, separators}, SS).
 
 -spec extend_buffer(
     riak_api_web_socket:socket(),
