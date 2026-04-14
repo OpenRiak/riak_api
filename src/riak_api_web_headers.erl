@@ -35,7 +35,7 @@
 -export([get_value/2, get_unique_value/2, lookup/3, prefix_fold/3]).
 -export([parse_primary_header_value/1]).
 -export([output_response_block/1, parse_request_block/3]).
--export([compile_separator/0]).
+-export([compile_separators/0]).
 
 -define(KV_SEPARATOR, <<": ">>).
 -define(V_SEPARATOR, <<", ">>).
@@ -403,7 +403,7 @@ normalize_value(MultipleValues) when is_list(MultipleValues) ->
 normalize_value(FieldValue) when is_binary(FieldValue) ->
     {CP, WS} =
         persistent_term:get(
-            {?MODULE, ?V_SEPARATOR},
+            {?MODULE, compile_patterns},
             {?V_SEPARATOR, ?OWS}
         ),
     lists:map(
@@ -419,11 +419,11 @@ normalize_value(FieldValue) when is_binary(FieldValue) ->
     ).
 
 %% @doc Call this function when initialising API
--spec compile_separator() -> ok.
-compile_separator() ->
+-spec compile_separators() -> ok.
+compile_separators() ->
     CP = binary:compile_pattern(?V_SEPARATOR),
     WS = binary:compile_pattern(?OWS),
-    persistent_term:put({?MODULE, ?V_SEPARATOR}, {CP, WS}).
+    persistent_term:put({?MODULE, compile_patterns}, {CP, WS}).
 
 %%%============================================================================
 %%% Eunit tests
