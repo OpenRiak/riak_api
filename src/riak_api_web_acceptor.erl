@@ -170,7 +170,7 @@ handle_request(Socket, InitBuffer) ->
             {ok, ModCtx3} ?=
                 CallbackMod:parse_request_headers(ReqHeaders, ModCtx2),
             {ok, {CLorChunk, UseGzip}} ?= expect_body(ReqHeaders),
-            {ok, InitReqBdy} ?=
+            {ok, InitReqBody} ?=
                 riak_api_web_body:initiate_body(
                     extend_buffer_fun(Socket),
                     BdyBuffer,
@@ -179,11 +179,48 @@ handle_request(Socket, InitBuffer) ->
                     MaxBodySize
                 ),
             ok ?= send_continue(Socket, ReqHeaders),
-            {ok, {Code, RspHeaders, RspBody, KeepAliveOK, ReqBdy1}, ModCtx4} ?=
+            {ok, NextReqBody, CallbackReqBody} ?=
+                case MaxBodySize of
+                    N when N == 0 ->
+                        case riak_api_web_body:confirm_empty(InitReqBody) of
+                            {ok, RemBody} ->
+                                {ok, RemBody, none};
+                            {error, content_too_large} ->
+                                {
+                                    halt,
+                                    413,
+                                    [{'Content-Type', <<"text/plain">>}],
+                                    <<>>,
+                                    []
+                                }
+                        end;
+                    _N ->
+                        {ok, none, InitReqBody}
+                end,
+            {ok, {Code, RspHeaders, RspBody, KeepAliveOK, RetBody}, ModCtx4} ?=
                 CallbackMod:process_request(
-                    InitReqBdy,
+                    CallbackReqBody,
                     ModCtx3
                 ),
+            {ok, BufferNext} ?=
+                case {NextReqBody, RetBody} of
+                    {NextReqBody, none} when NextReqBody =/= none ->
+                        {ok, riak_api_web_body:get_buffer(NextReqBody)};
+                    {none, RetBody} when RetBody =/= none ->
+                        {ok, riak_api_web_body:get_buffer(RetBody)};
+                    _ ->
+                        WarnText =
+                            "Incorrect handling of request body buffer in"
+                            " callback module ~w",
+                        ?LOG_WARNING(WarnText, [CallbackMod]),
+                        {
+                            halt,
+                            500,
+                            [{'Content-Type', <<"text/plain">>}],
+                            <<"Error handling request body">>,
+                            []
+                        }
+                end,
             Keepalive =
                 request_prefers_keepalive(Version, ReqHeaders) andalso
                     KeepAliveOK,
@@ -200,7 +237,7 @@ handle_request(Socket, InitBuffer) ->
                 RspBody,
                 {CallbackMod, ModCtx4},
                 Socket,
-                riak_api_web_body:get_buffer(ReqBdy1),
+                BufferNext,
                 StartTime
             }
         else
@@ -285,13 +322,11 @@ extend_buffer(Socket, Buffer, Needed, Timeout) when is_integer(Needed) ->
     case riak_api_web_socket:recv(Socket, Needed, get_timeout(Timeout)) of
         {ok, Data} when is_binary(Data) ->
             <<Buffer/binary, Data/binary>>;
-        {error, Reason} ->
-            ?LOG_WARNING(
-                "Unexpected failure to read data from client "
-                "~w for socket ~0p",
-                [Reason, Socket]
-            ),
+        {error, closed} ->
             riak_api_web_socket:close(Socket),
+            exit(normal);
+        {error, Reason} ->
+            log_unexpected_recv(Socket, Reason),
             exit(normal)
     end;
 extend_buffer(Socket, Buffer, line, Timeout) ->
@@ -299,14 +334,19 @@ extend_buffer(Socket, Buffer, line, Timeout) ->
         {ok, Data} when is_binary(Data) ->
             <<Buffer/binary, Data/binary>>;
         {error, Reason} ->
-            ?LOG_WARNING(
-                "Unexpected failure to read data from client "
-                "~w for socket ~0p",
-                [Reason, Socket]
-            ),
-            riak_api_web_socket:close(Socket),
+            log_unexpected_recv(Socket, Reason),
             exit(normal)
     end.
+
+-spec log_unexpected_recv(
+    riak_api_web_socket:socket(),
+    term()
+) ->
+    ok | {error, term()}.
+log_unexpected_recv(Socket, Reason) ->
+    LogText = "Unexpected failure to read data from client ~w for socket ~0p",
+    ?LOG_WARNING(LogText, [Reason, Socket]),
+    riak_api_web_socket:close(Socket).
 
 -spec extend_buffer_fun(
     riak_api_web_socket:socket()
@@ -632,11 +672,15 @@ generate_binary_response(RspCode, RspHeaders, RspBody) ->
 get_response_line({1, 0}, 200) ->
     <<"HTTP/1.0 200 OK\r\n">>;
 get_response_line({1, 0}, 201) ->
-    <<"HTTP/1.0 201 Accepted\r\n">>;
+    <<"HTTP/1.0 201 Created\r\n">>;
+get_response_line({1, 0}, 204) ->
+    <<"HTTP/1.0 204 No Content\r\n">>;
 get_response_line({1, 1}, 200) ->
     <<"HTTP/1.1 200 OK\r\n">>;
 get_response_line({1, 1}, 201) ->
-    <<"HTTP/1.1 201 Accepted\r\n">>;
+    <<"HTTP/1.1 201 Created\r\n">>;
+get_response_line({1, 1}, 204) ->
+    <<"HTTP/1.1 204 No Content\r\n">>;
 get_response_line({1, 0}, Code) ->
     iolist_to_binary(
         [

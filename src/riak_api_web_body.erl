@@ -30,7 +30,15 @@
 
 -module(riak_api_web_body).
 
--export([get_buffer/1, initiate_body/5, get_body/3, is_gzip/1]).
+-export(
+    [
+        get_buffer/1,
+        initiate_body/5,
+        get_body/3,
+        confirm_empty/1,
+        is_gzip/1
+    ]
+).
 
 -record(req_body, {
     buffer :: binary(),
@@ -77,7 +85,7 @@ get_buffer(ReqBody) ->
     binary(),
     chunked | non_neg_integer(),
     boolean(),
-    pos_integer()
+    non_neg_integer()
 ) ->
     {ok, req_body()}.
 initiate_body(BufferFun, BdyBuffer, CLorChunk, UseGzip, MaxBodySize) ->
@@ -91,6 +99,20 @@ initiate_body(BufferFun, BdyBuffer, CLorChunk, UseGzip, MaxBodySize) ->
             buffer_fun = BufferFun
         }
     }.
+
+-spec confirm_empty(
+    riak_api_web_body:req_body()
+) ->
+    {ok, riak_api_web_body:req_body()} | {error, content_too_large}.
+confirm_empty(ReqBody) ->
+    case riak_api_web_body:get_body(ReqBody, all, 10000) of
+        {done, UpdBody} ->
+            {ok, UpdBody};
+        {<<>>, UpdBody} ->
+            confirm_empty(UpdBody);
+        {error, content_too_large} ->
+            {error, content_too_large}
+    end.
 
 -spec get_body(
     req_body(), all | pos_integer(), pos_integer() | undefined

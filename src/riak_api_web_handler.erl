@@ -44,9 +44,10 @@
 -type max_header_size() :: pos_integer().
     %% The maximum size of a single header value.  If concatenating multiple
     %% values causes issues with this limit - the may be split across headers.
--type max_body_size() :: pos_integer().
+-type max_body_size() :: non_neg_integer().
     %% The maximum size of the body (on the wire) i.e. prior to being unzipped
-    %% if compression is allowed
+    %% if compression is allowed.  Should be set to 0 if no request body is
+    %% expected
 -type limits() :: {max_header_count(), max_header_size(), max_body_size()}.
 
 -export_type(
@@ -113,7 +114,7 @@
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
 
--type stream_fun() :: fun(() -> {binary(), done|stream_fun()}).
+-type stream_fun() :: fun(() -> {binary(), stream_fun()}|done).
 -type response_body() ::
     binary() | {stream, stream_fun()}.
 
@@ -150,10 +151,13 @@
 %% acceptable.
 %% 
 %% The final req_body() must also be returned, so that any remaining data on
-%% the buffer is available to the acceptor. 
+%% the buffer is available to the acceptor. If the size_limit on the request
+%% is set to 0, then a req_body() of none will be sent and should be returned.
+%% If a non-zero request body is expected the whole body should be read from
+%% the buffer before returning the updated request body object.
 -callback
     process_request(
-        riak_api_web_body:req_body(),
+        riak_api_web_body:req_body()|none,
         context()
     ) ->
         {
@@ -163,7 +167,7 @@
                 riak_api_web_headers:header_list(),
                 response_body(),
                 boolean(),
-                riak_api_web_body:req_body()
+                riak_api_web_body:req_body()|none
             },
             context()
         } | riak_api_web_acceptor:halt_response().

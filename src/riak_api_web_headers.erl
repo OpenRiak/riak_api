@@ -274,8 +274,8 @@ output_response_block(#headers{type = T, header_map = HM}) when T == response ->
         )
     ).
 
--define(COUNT_EXCEEDED, <<"Header count exceed ~w">>).
--define(SIZE_EXCEEDED, <<"Header exceeded maximum size of ~w">>).
+-define(COUNT_EXCEEDED, <<"Headers exceeded maximum count of ~w">>).
+-define(SIZE_EXCEEDED, <<"Header ~s exceeded maximum size of ~w">>).
 
 %% @doc
 %% Parse a binary block representing the start of a block of request headers,
@@ -293,8 +293,8 @@ parse_request_block(_B, _BFun, {MaxCount, _MS}, {_H, C}) when C > MaxCount ->
     {halt, 431, [], ?COUNT_EXCEEDED, [MaxCount]};
 parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}, {HeaderAcc, C}) ->
     case erlang:decode_packet(httph_bin, Buffer, []) of
-        {ok, {http_header, _, _, _, V}, _} when byte_size(V) > MaxSize ->
-            {halt, 431, [], ?SIZE_EXCEEDED, [MaxSize]};
+        {ok, {http_header, _, _, OrigKey, V}, _} when byte_size(V) > MaxSize ->
+            {halt, 431, [], ?SIZE_EXCEEDED, [OrigKey, MaxSize]};
         {ok, {http_header, _, Key, _OrigKey, Value}, Rest} when is_atom(Key) ->
             parse_request_block(
                 Rest,
@@ -458,7 +458,6 @@ split_perf_test() ->
         ),
     ?assertMatch(L1, L2),
     io:format(user, "No-compile ~w compile ~w microseconds", [TS1, TS2]).
-
 
 parse_block_test() ->
     RequestHeader1 =

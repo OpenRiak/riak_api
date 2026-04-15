@@ -60,7 +60,7 @@ add_routes(Routes) ->
     {
         ok,
         module(),
-        {pos_integer(), pos_integer(), pos_integer()},
+        {pos_integer(), pos_integer(), non_neg_integer()},
         any()
     }
     | riak_api_web_acceptor:halt_response().
@@ -83,7 +83,9 @@ get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
                     )
                 ),
             {halt, 405, [{'Allow', AllowHdrVal}], <<>>, []};
-        {ok, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context} ->
+        {ok, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context} when
+            MaxHdrCount > 0, MaxHdrSize > 0, MaxBodySize >= 0
+        ->
             {ok, CallbackMod, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context}
     end.
 
@@ -183,7 +185,7 @@ cache_today() ->
 rfc1123_date_now() ->
     {Date, Time} = calendar:now_to_universal_time(os:timestamp()),
     case persistent_term:get({?MODULE, cache_today}, undefined) of
-        {Date, DateBin} ->
+        {CachedDate, DateBin} when CachedDate == Date ->
             rfc1123_date(DateBin, Time);
         _ ->
             spawn(fun cache_today/0),
@@ -320,5 +322,27 @@ date_speed_test() ->
         ),
     io:format(user, "With pre-cached dates ~w~n", [TC3]),
     ?assert(DL1 == DL3).
+
+check_date_is_autocached_test() ->
+    persistent_term:erase({?MODULE, cache_today}),
+    rfc1123_date_now(),
+    true =
+        lists:foldl(
+            fun(I, Acc) ->
+                case Acc of
+                    true ->
+                        true;
+                    false ->
+                        timer:sleep(I),
+                        not_cached =/=
+                            persistent_term:get(
+                                {?MODULE, cache_today}, not_cached
+                            )
+                end
+            end,
+            false,
+            lists:seq(1, 100)
+        ),
+    rfc1123_date_now().
 
 -endif.

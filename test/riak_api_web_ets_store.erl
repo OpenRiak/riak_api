@@ -544,7 +544,10 @@ put_big_header({A, B, C, D}, Port) ->
                 [{body_format, binary}],
                 test_client
             ),
-        ?assertMatch(<<"Header exceeded maximum size of 1024">>, RspBdy)
+        ?assertMatch(
+            <<"Header x-riak-vclock exceeded maximum size of 1024">>,
+            RspBdy
+        )
     end.
 
 find_available_port([]) ->
