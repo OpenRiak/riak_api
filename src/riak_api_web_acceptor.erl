@@ -397,6 +397,9 @@ expect_body(Headers) ->
             {ok, {chunked, false}};
         {undefined, [<<"chunked">>, <<"gzip">>]} ->
             {ok, {chunked, true}};
+        {undefined, undefined} ->
+            % Assume no content - and set content-length to 0
+            {ok, {0, false}};
         {undefined, UnexpectedEncoding} ->
             UEWarn = <<"Received encoding ~0p without content length">>,
             bad_request(UEWarn, [UnexpectedEncoding]);
@@ -905,6 +908,9 @@ expect_test() ->
             ]
         ),
     ?assertMatch({ok, {1024, false}}, expect_body(FixedLength)),
+    Empty = riak_api_web_headers:make([]),
+    % e.g. just curl GET from command line - no encoding or content-length
+    ?assertMatch({ok, {0, false}}, expect_body(Empty)),
     FixedLengthGZ =
         riak_api_web_headers:make(
             [
