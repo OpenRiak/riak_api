@@ -284,25 +284,20 @@ compile_detectors() ->
     CP = binary:compile_pattern([<<"%">>, <<".">>]),
     persistent_term:put({?MODULE, compile_patterns}, CP).
 
--spec check_normalised(uri_string:uri_map()) -> {binary(), binary()}.
-check_normalised(URIMap) ->
+-spec normalise_path(binary()) -> uri_string:uri_map() | uri_string:error().
+normalise_path(URI) ->
     CP = persistent_term:get({?MODULE, compile_patterns}),
-    Path = normalise_string(maps:get(path, URIMap, <<>>), CP),
-    QueryParams = normalise_string(maps:get(query, URIMap, <<>>), CP),
-    {Path, QueryParams}.
-
-normalise_string(<<>>, _CP) ->
-    <<>>;
-normalise_string(Bin, CP) ->
-    case binary:match(Bin, CP) of
+    case binary:match(URI, CP) of
         nomatch ->
-            Bin;
+            % There is no percent-encoded content, or no path reversing, and
+            % so it is safe to parse rather than normalise
+            uri_string:parse(URI);
         _ ->
-            uri_string:normalize(Bin)
+            uri_string:normalize(URI, [return_map])
     end.
 
 -spec split_path(
-    iodata()
+    binary()
 ) ->
     {
         ok,
@@ -314,9 +309,10 @@ normalise_string(Bin, CP) ->
     }
     | halt_response().
 split_path(URIPath) ->
-    case uri_string:parse(URIPath) of
+    case normalise_path(URIPath) of
         URIMap when is_map(URIMap) ->
-            {PathN, QueryParamsN} = check_normalised(URIMap),
+            {PathN, QueryParamsN} =
+                {maps:get(path, URIMap, <<>>), maps:get(query, URIMap, <<>>)},
             SplitPath = binary:split(PathN, <<"/">>, [global, trim_all]),
             case uri_string:dissect_query(QueryParamsN) of
                 QueryParams when is_list(QueryParams) ->
@@ -329,7 +325,7 @@ split_path(URIPath) ->
             end;
         {error, NTerm, NReason} ->
             bad_request(
-                <<"Path cannot be normalized ~w  - ~0p">>,
+                <<"Path cannot be normalized ~w - ~0p">>,
                 [NTerm, NReason]
             )
     end.
@@ -922,6 +918,18 @@ stream_fun() ->
                 done
         end
     end.
+
+normalise_path_test() ->
+    compile_detectors(),
+    URI1 = <<"types/BT/buckets/B/keys/K?return_terms">>,
+    URI2 = <<"types/BT/buckets/../buckets/B/key%73/K?return_term%73">>,
+    {ok, Output1} = split_path(URI1),
+    {ok, Output2} = split_path(URI2),
+    ?assertMatch(Output1, Output2),
+    URI3 = <<"types/T/buckets/Swedes/keys/%C3%85berg?return_terms">>,
+    {ok, {_, SP, _}} = split_path(URI3),
+    [<<"types">>, <<"T">>, <<"buckets">>, <<"Swedes">>, <<"keys">>, Name] = SP,
+    ?assertMatch(<<"Åberg"/utf8>>, uri_string:unquote(Name)).
 
 expect_test() ->
     FixedLength =
