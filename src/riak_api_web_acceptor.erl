@@ -28,7 +28,7 @@
 
 -export([start_link/1, init/2]).
 
--export([extend_buffer/4]).
+-export([extend_buffer/4, compile_detectors/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -278,6 +278,29 @@ reset_version() ->
 bad_request(Error, Subs) ->
     {halt, 400, [], Error, Subs}.
 
+%% @doc %% @doc Call this function when initialising API
+-spec compile_detectors() -> ok.
+compile_detectors() ->
+    CP = binary:compile_pattern([<<"%">>, <<".">>]),
+    persistent_term:put({?MODULE, compile_patterns}, CP).
+
+-spec check_normalised(uri_string:uri_map()) -> {binary(), binary()}.
+check_normalised(URIMap) ->
+    CP = persistent_term:get({?MODULE, compile_patterns}),
+    Path = normalise_string(maps:get(path, URIMap, <<>>), CP),
+    QueryParams = normalise_string(maps:get(query, URIMap, <<>>), CP),
+    {Path, QueryParams}.
+
+normalise_string(<<>>, _CP) ->
+    <<>>;
+normalise_string(Bin, CP) ->
+    case binary:match(Bin, CP) of
+        nomatch ->
+            Bin;
+        _ ->
+            uri_string:normalize(Bin)
+    end.
+
 -spec split_path(
     iodata()
 ) ->
@@ -291,13 +314,13 @@ bad_request(Error, Subs) ->
     }
     | halt_response().
 split_path(URIPath) ->
-    case uri_string:normalize(URIPath, [return_map]) of
+    case uri_string:parse(URIPath) of
         URIMap when is_map(URIMap) ->
-            Path = maps:get(path, URIMap, <<"">>),
-            SplitPath = binary:split(Path, <<"/">>, [global, trim_all]),
-            case uri_string:dissect_query(maps:get(query, URIMap, <<"">>)) of
+            {PathN, QueryParamsN} = check_normalised(URIMap),
+            SplitPath = binary:split(PathN, <<"/">>, [global, trim_all]),
+            case uri_string:dissect_query(QueryParamsN) of
                 QueryParams when is_list(QueryParams) ->
-                    {ok, {Path, SplitPath, QueryParams}};
+                    {ok, {PathN, SplitPath, QueryParams}};
                 {error, QTerm, QReason} ->
                     bad_request(
                         <<"Query parameters not parsed ~w  - ~0p">>,
