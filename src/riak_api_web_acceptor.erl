@@ -293,7 +293,12 @@ normalise_path(URI) ->
             % so it is safe to parse rather than normalise
             uri_string:parse(URI);
         _ ->
-            uri_string:normalize(URI, [return_map])
+            case uri_string:normalize(URI, [return_map]) of
+                URIMap when is_map(URIMap) ->
+                    uri_string:percent_decode(URIMap);
+                {error, Type, Detail} ->
+                    {error, Type, Detail}
+            end
     end.
 
 -spec split_path(
@@ -311,8 +316,8 @@ normalise_path(URI) ->
 split_path(URIPath) ->
     case normalise_path(URIPath) of
         URIMap when is_map(URIMap) ->
-            {PathN, QueryParamsN} =
-                {maps:get(path, URIMap, <<>>), maps:get(query, URIMap, <<>>)},
+            PathN = maps:get(path, URIMap, <<>>),
+            QueryParamsN = maps:get(query, URIMap, <<>>),
             SplitPath = binary:split(PathN, <<"/">>, [global, trim_all]),
             case uri_string:dissect_query(QueryParamsN) of
                 QueryParams when is_list(QueryParams) ->
@@ -929,7 +934,7 @@ normalise_path_test() ->
     URI3 = <<"types/T/buckets/Swedes/keys/%C3%85berg?return_terms">>,
     {ok, {_, SP, _}} = split_path(URI3),
     [<<"types">>, <<"T">>, <<"buckets">>, <<"Swedes">>, <<"keys">>, Name] = SP,
-    ?assertMatch(<<"Åberg"/utf8>>, uri_string:unquote(Name)).
+    ?assertMatch(<<"Åberg"/utf8>>, Name).
 
 expect_test() ->
     FixedLength =
