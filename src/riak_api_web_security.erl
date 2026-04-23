@@ -54,7 +54,7 @@ is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
             try
                 UserPass = base64:decode(Base64UP),
                 [User, Pass] = string:lexemes(UserPass, ":"),
-                case AuthFun(User, Pass, [Peer]) of
+                case AuthFun(User, Pass, Peer) of
                     {ok, SecContext} ->
                         {ok, SecContext};
                     {error, Error} ->
@@ -62,23 +62,22 @@ is_authorised(true, https, ReqHeaders, Peer, AuthFun) ->
                 end
             catch
                 _:ExError ->
-                    ?LOG_WARNING("Error decoding credentials ~0p", [ExError]),
-                    {
-                        halt,
-                        400,
-                        [?TXT_HEADER],
-                        <<"Error decoding credentials">>,
-                        []
-                    }
+                    error_decoding_credentials(ExError)
             end;
+        undefined ->
+            {halt, 401, [?TXT_HEADER], <<"No credentials provided">>, []};
         Unexpected ->
-            ?LOG_WARNING("Error decoding credentials ~0p", [Unexpected]),
-            {halt, 400, [?TXT_HEADER], <<"Error decoding credentials">>, []}
+            error_decoding_credentials(Unexpected)
     end;
 is_authorised(true, http, _ReqHeaders, _Peer, _AuthFun) ->
     {halt, 426, [?TXT_HEADER], <<"Upgrade required to https">>, []};
 is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
     {ok, undefined}.
+
+error_decoding_credentials(ErrorTerm) ->
+    ?LOG_WARNING("Error decoding credentials ~0p", [ErrorTerm]),
+    {halt, 400, [?TXT_HEADER], <<"Error decoding credentials">>, []}.
+
 
 %%%============================================================================
 %%% Eunit tests
@@ -152,6 +151,23 @@ simple_security_test() ->
             true,
             https,
             MultipleHeaders,
+            {ip, {127, 0, 0, 1}},
+            AuthFun
+        )
+    ),
+    NoAuthHeaders =
+        riak_api_web_headers:make(
+            [
+                {'Content-Length', <<"1024">>},
+                {<<"X-Riak-VClock">>, <<"ABC123==">>}
+            ]
+        ),
+    ?assertMatch(
+        {halt, 401, [?TXT_HEADER], <<"No credentials provided">>, []},
+        is_authorised(
+            true,
+            https,
+            NoAuthHeaders,
             {ip, {127, 0, 0, 1}},
             AuthFun
         )
