@@ -78,7 +78,6 @@ error_decoding_credentials(ErrorTerm) ->
     ?LOG_WARNING("Error decoding credentials ~0p", [ErrorTerm]),
     {halt, 400, [?TXT_HEADER], <<"Error decoding credentials">>, []}.
 
-
 %%%============================================================================
 %%% Eunit tests
 %%%============================================================================
