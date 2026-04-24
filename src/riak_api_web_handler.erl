@@ -54,6 +54,7 @@
     [
         limits/0,
         peer_ip/0,
+        peer_cert/0,
         query_params/0,
         stream_fun/0,
         response_body/0,
