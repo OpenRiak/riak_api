@@ -77,6 +77,7 @@
 
 -type peer_ip() :: inet:ip_address().
     %% The IP address of the client device connected to the socket
+-type peer_cert() :: public_key:cert() | undefined.
 
 %% @doc check_permissions for using this module or route
 %% The context() passed will be the context() returned from match_route/2 - so
@@ -89,7 +90,7 @@
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
         peer_ip(),
-        public_key:cert() | undefined,
+        peer_cert(),
         context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().
