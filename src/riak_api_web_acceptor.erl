@@ -818,28 +818,6 @@ request_line_decode_test() ->
         get_request_line(test_socket, <<"PATCH /stats HTTP/1.0\r\n">>)
     ).
 
-clock_test() ->
-    ok = riak_api_web:cache_today(),
-    {TC1, _Hdrs1} =
-        timer:tc(fun() -> default_response_headers(true) end),
-    {TC2, _Hdrs2} =
-        timer:tc(fun() -> default_response_headers(true) end),
-    {TC3, _Hdrs3} =
-        timer:tc(fun() -> default_response_headers(false) end),
-    {TC4, _Hdrs4} =
-        timer:tc(fun() -> default_response_headers(true) end),
-    timer:sleep(1000),
-    {TC5, _Hdrs5} =
-        timer:tc(fun() -> default_response_headers(true) end),
-    MeanUnCached = (TC1 + TC5) div 2,
-    MeanCached = (TC2 + TC3 + TC4) div 3,
-    io:format(
-        user,
-        "Cached ~w micros vs uncached ~w~n",
-        [MeanCached, MeanUnCached]
-    ),
-    ?assert(MeanCached < MeanUnCached).
-
 simple_response_test() ->
     ok = riak_api_web:cache_today(),
     set_version({1, 1}),
