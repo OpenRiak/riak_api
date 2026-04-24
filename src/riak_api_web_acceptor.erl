@@ -102,7 +102,8 @@ init(Server, Listener) ->
     case riak_api_web_socket:accept(Listener, ?ACCEPT_TIMEOUT) of
         {ok, Socket} ->
             ok = riak_api_web_socket:acceptor_accepted(Server),
-            loop(Socket, <<>>);
+            {ok, PeerIP, Cert} = riak_api_web_socket:get_peer(Socket),
+            loop(Socket, <<>>, PeerIP, Cert);
         {error, timeout} ->
             init(Server, Listener);
         {error, {tls_alert, Alert}} ->
@@ -118,13 +119,19 @@ init(Server, Listener) ->
 %%% Primary Loop
 %%%============================================================================
 
--spec loop(riak_api_web_socket:socket(), binary()) -> ok.
-loop(Socket, InitBuffer) ->
+-spec loop(
+    riak_api_web_socket:socket(),
+    binary(),
+    inet:ip_address(),
+    public_key:cert()|undefined
+) -> 
+    ok.
+loop(Socket, InitBuffer, PeerIP, Cert) ->
     %% In the keepalive loop, the send buffer is assumed to be empty
     %% An so pipelining of requests (in parallel) is explicitly not supported
-    case handle_request(Socket, InitBuffer) of
+    case handle_request(Socket, InitBuffer, PeerIP, Cert) of
         {KeepAlive, Buffer} when KeepAlive == true ->
-            loop(Socket, Buffer);
+            loop(Socket, Buffer, PeerIP, Cert);
         _Close ->
             riak_api_web_socket:close(Socket),
             ok
@@ -132,15 +139,16 @@ loop(Socket, InitBuffer) ->
 
 -spec handle_request(
     riak_api_web_socket:socket(),
-    binary()
+    binary(),
+    inet:ip_address(),
+    public_key:cert()|undefined
 ) ->
     {boolean(), binary()} | close.
-handle_request(Socket, InitBuffer) ->
+handle_request(Socket, InitBuffer, PeerIP, Cert) ->
     StartTime = os:system_time(microsecond),
     reset_version(),
     RequestResult =
         maybe
-            {ok, PeerIP} = riak_api_web_socket:get_peer(Socket),
             {ok, {Method, RawPath, Version, HdrBuffer}} ?=
                 get_request_line(Socket, InitBuffer),
             set_version(Version),
@@ -163,6 +171,7 @@ handle_request(Socket, InitBuffer) ->
                     ReqHeaders,
                     element(1, Socket),
                     PeerIP,
+                    Cert,
                     InitModCtx
                 ),
             {ok, ModCtx2} ?=

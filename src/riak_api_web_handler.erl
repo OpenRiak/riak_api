@@ -89,6 +89,7 @@
         riak_api_web_headers:headers(),
         riak_api_web_socket:scheme(),
         peer_ip(),
+        public_key:cert() | undefined,
         context()
     ) -> 
         {ok, context()}|riak_api_web_acceptor:halt_response().

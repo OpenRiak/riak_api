@@ -520,18 +520,26 @@ close({http, Socket}) ->
 close({https, Socket}) ->
     ssl:close(Socket).
 
--spec get_peer(socket()) -> {ok, inet:ip_address()} | {error, any()}.
+-spec get_peer(
+    socket()
+) ->
+    {ok, inet:ip_address(), public_key:cert()|undefined} | {error, any()}.
 get_peer({http, Socket}) ->
     case inet:peername(Socket) of
         {ok, {Addr, _Port}} when is_tuple(Addr) ->
-            {ok, Addr};
+            {ok, Addr, undefined};
         {error, Error} ->
             {error, Error}
     end;
 get_peer({https, Socket}) ->
     case ssl:peername(Socket) of
         {ok, {Addr, _Port}} when is_tuple(Addr) ->
-            {ok, Addr};
+            case ssl:peercert(Socket) of
+                {ok, Cert} ->
+                    {ok, Addr, Cert};
+                _ ->
+                    {ok, Addr, undefined}
+            end;
         {error, Error} ->
             {error, Error}
     end.
