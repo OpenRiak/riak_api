@@ -350,7 +350,7 @@ request_single_value(IPAddr, Port, Size) ->
             gen_tcp:connect(
                 IPAddr,
                 Port,
-                [binary, {packet, raw}, {active, false}]
+                [binary, {packet, raw}, {active, false}, {recbuf, 64 * 1024}]
             ),
         Request = ?REQUEST_BIN(1, Size, <<"close">>),
         ok = gen_tcp:send(Socket, Request),
