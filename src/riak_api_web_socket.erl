@@ -523,7 +523,7 @@ close({https, Socket}) ->
 -spec get_peer(
     socket()
 ) ->
-    {ok, inet:ip_address(), public_key:cert()|undefined} | {error, any()}.
+    {ok, inet:ip_address(), public_key:cert() | undefined} | {error, any()}.
 get_peer({http, Socket}) ->
     case inet:peername(Socket) of
         {ok, {Addr, _Port}} when is_tuple(Addr) ->

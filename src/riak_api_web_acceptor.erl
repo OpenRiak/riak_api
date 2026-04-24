@@ -123,8 +123,8 @@ init(Server, Listener) ->
     riak_api_web_socket:socket(),
     binary(),
     inet:ip_address(),
-    public_key:cert()|undefined
-) -> 
+    public_key:cert() | undefined
+) ->
     ok.
 loop(Socket, InitBuffer, PeerIP, Cert) ->
     %% In the keepalive loop, the send buffer is assumed to be empty
@@ -141,7 +141,7 @@ loop(Socket, InitBuffer, PeerIP, Cert) ->
     riak_api_web_socket:socket(),
     binary(),
     inet:ip_address(),
-    public_key:cert()|undefined
+    public_key:cert() | undefined
 ) ->
     {boolean(), binary()} | close.
 handle_request(Socket, InitBuffer, PeerIP, Cert) ->
