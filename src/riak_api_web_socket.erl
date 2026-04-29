@@ -107,8 +107,11 @@
     %% when the previous process has not completed the close
     | {packet, raw}
     | {active, boolean()}
-%% After a connection is accepted the socket is manually read to be
-%% decoded
+    %% After a connection is accepted the socket is manually read to be
+    %% decoded
+    | {backlog, pos_integer()}
+%% If this is too low it may result in some requests being reset when
+%% there is a burst of new connections
 .
 
 -type buffer_option() ::
@@ -323,7 +326,8 @@ default_socket_options(IPAddr) ->
         binary,
         {reuseaddr, true},
         {packet, raw},
-        {active, false}
+        {active, false},
+        {backlog, 128}
     ].
 
 -spec get_acceptor_pool(socket(), list(option())) ->
