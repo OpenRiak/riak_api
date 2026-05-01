@@ -26,7 +26,7 @@
 -feature(maybe_expr, enable).
 -endif.
 
--export([start_link/1, init/2]).
+-export([start_link/2, init/3]).
 
 -export([extend_buffer/4, compile_detectors/0]).
 
@@ -93,22 +93,22 @@
 %%% API
 %%%============================================================================
 
--spec start_link(riak_api_web_socket:socket()) -> pid().
-start_link(Socket) ->
-    spawn_link(?MODULE, init, [self(), Socket]).
+-spec start_link(riak_api_web_socket:socket(), inet:port_number()) -> pid().
+start_link(Socket, Port) ->
+    spawn_link(?MODULE, init, [self(), Socket, Port]).
 
--spec init(pid(), riak_api_web_socket:socket()) -> ok.
-init(Server, Listener) ->
+-spec init(pid(), riak_api_web_socket:socket(), inet:port_number()) -> ok.
+init(Server, Listener, Port) ->
     case riak_api_web_socket:accept(Listener, ?ACCEPT_TIMEOUT) of
         {ok, Socket} ->
             ok = riak_api_web_socket:acceptor_accepted(Server),
             {ok, PeerIP, Cert} = riak_api_web_socket:get_peer(Socket),
-            loop(Socket, <<>>, PeerIP, Cert);
+            loop(Socket, <<>>, PeerIP, Cert, Port);
         {error, timeout} ->
-            init(Server, Listener);
+            init(Server, Listener, Port);
         {error, {tls_alert, Alert}} ->
             ?LOG_WARNING("TLS Alert received ~0p", [Alert]),
-            init(Server, Listener);
+            init(Server, Listener, Port);
         {error, closed} ->
             ok;
         {error, Other} ->
@@ -123,15 +123,16 @@ init(Server, Listener) ->
     riak_api_web_socket:socket(),
     binary(),
     inet:ip_address(),
-    public_key:cert() | undefined
+    public_key:cert() | undefined,
+    inet:port_number()
 ) ->
     ok.
-loop(Socket, InitBuffer, PeerIP, Cert) ->
+loop(Socket, InitBuffer, PeerIP, Cert, Port) ->
     %% In the keepalive loop, the send buffer is assumed to be empty
     %% An so pipelining of requests (in parallel) is explicitly not supported
-    case handle_request(Socket, InitBuffer, PeerIP, Cert) of
+    case handle_request(Socket, InitBuffer, PeerIP, Cert, Port) of
         {KeepAlive, Buffer} when KeepAlive == true ->
-            loop(Socket, Buffer, PeerIP, Cert);
+            loop(Socket, Buffer, PeerIP, Cert, Port);
         _Close ->
             riak_api_web_socket:close(Socket),
             ok
@@ -141,10 +142,11 @@ loop(Socket, InitBuffer, PeerIP, Cert) ->
     riak_api_web_socket:socket(),
     binary(),
     inet:ip_address(),
-    public_key:cert() | undefined
+    public_key:cert() | undefined,
+    inet:port_number()
 ) ->
     {boolean(), binary()} | close.
-handle_request(Socket, InitBuffer, PeerIP, Cert) ->
+handle_request(Socket, InitBuffer, PeerIP, Cert, Port) ->
     StartTime = os:system_time(microsecond),
     reset_version(),
     RequestResult =
@@ -159,7 +161,7 @@ handle_request(Socket, InitBuffer, PeerIP, Cert) ->
                 {MaxHdrCount, MaxHdrSize, MaxBodySize},
                 InitModCtx
             } ?=
-                riak_api_web:get_route(Method, Path, SplitPath),
+                riak_api_web:get_route(Port, Method, Path, SplitPath),
             {ok, ReqHeaders, BdyBuffer} ?=
                 get_request_headers(
                     HdrBuffer,

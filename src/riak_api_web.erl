@@ -29,7 +29,8 @@
         get_listeners/0,
         binding_config/2,
         add_routes/1,
-        get_route/3,
+        add_routes/2,
+        get_route/4,
         spec_name/3,
         rfc1123_date/1,
         rfc1123_date/2,
@@ -38,8 +39,7 @@
     ]
 ).
 
--define(ROUTE_KEY, {?MODULE, web_routes}).
-
+-type binding() :: {inet:ip_address(), inet:port_number()}.
 -type route() :: {1..100, module()}.
 
 %%%============================================================================
@@ -48,11 +48,20 @@
 
 -spec add_routes(list(route())) -> ok.
 add_routes(Routes) ->
-    CurrentRoutes = persistent_term:get(?ROUTE_KEY, []),
+    add_routes(default, Routes).
+
+-spec add_routes(
+    inet:port_number() | default,
+    list(route())
+) ->
+    ok.
+add_routes(ServerName, Routes) ->
+    CurrentRoutes = persistent_term:get({?MODULE, ServerName}, []),
     NewRoutes = lists:keysort(1, CurrentRoutes ++ Routes),
-    persistent_term:put(?ROUTE_KEY, NewRoutes).
+    persistent_term:put({?MODULE, ServerName}, NewRoutes).
 
 -spec get_route(
+    inet:port_number(),
     riak_api_web_acceptor:method(),
     unicode:chardata(),
     list(unicode:chardata())
@@ -64,16 +73,20 @@ add_routes(Routes) ->
         any()
     }
     | riak_api_web_acceptor:halt_response().
-get_route(Method, Path, SplitPath) ->
-    CurrentRoutes = persistent_term:get(?ROUTE_KEY, []),
-    get_route(CurrentRoutes, Method, Path, SplitPath).
+get_route(Port, Method, Path, SplitPath) ->
+    CurrentRoutes =
+        persistent_term:get(
+            {?MODULE, Port},
+            persistent_term:get({?MODULE, default}, [])
+        ),
+    select_route(CurrentRoutes, Method, Path, SplitPath).
 
-get_route([], _Method, _Path, _SP) ->
+select_route([], _Method, _Path, _SP) ->
     {halt, 404, [], <<>>, []};
-get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
+select_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
     case CallbackMod:match_route(Method, Path, SplitPath) of
         nomatch ->
-            get_route(Rest, Method, Path, SplitPath);
+            select_route(Rest, Method, Path, SplitPath);
         {method_not_allowed, AllowedMethods} ->
             AllowHdrVal =
                 iolist_to_binary(
@@ -96,14 +109,9 @@ get_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
 get_listeners() ->
     get_listeners(http) ++ get_listeners(https).
 
+-spec get_listeners(http | https) -> list({https | https, binding()}).
 get_listeners(Scheme) ->
-    Listeners =
-        case app_helper:try_envs([{riak_api, Scheme}], []) of
-            {riak_api, Scheme, List} when is_list(List) ->
-                List;
-            _ ->
-                []
-        end,
+    Listeners = application:get_env(riak_api, Scheme, []),
     lists:usort([{Scheme, Binding} || Binding <- Listeners]).
 
 binding_config(Scheme, Binding) ->

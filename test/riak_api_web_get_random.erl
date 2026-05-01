@@ -262,10 +262,11 @@ setup() ->
             {name, SpecName},
             {ip, IPAddr},
             {port, TestPort},
-            {web_acceptor_pool_start_size, 4}
+            {acceptor_pool_start_size, 4},
+            {acceptor_pool_max_size, 8}
         ],
     {ok, _Pid} = riak_api_web_socket:start_link(Options),
-    riak_api_web:add_routes([{10, ?MODULE}]),
+    riak_api_web:add_routes(TestPort, [{10, ?MODULE}]),
     {ok, _HTTPC} = inets:start(httpc, [{profile, test_client}]),
     ok = httpc:set_options([{verbose, false}], test_client),
     {SpecName, IPAddr, TestPort}

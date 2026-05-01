@@ -241,7 +241,8 @@ init(Options) ->
         end,
     SocketOpts = default_socket_options(IP),
     {ok, Listener} = listen(Protocol, Port, SocketOpts, BufferOpts, SSLOpts),
-    {AcceptorPool, StartSize, MaxSize} = get_acceptor_pool(Listener, Options),
+    {AcceptorPool, StartSize, MaxSize} =
+        get_acceptor_pool(Listener, Port, Options),
     ?LOG_INFO(
         "Acceptor pool for web started on IP ~0p port ~w of size ~w",
         [IP, Port, StartSize]
@@ -284,7 +285,8 @@ handle_cast(accepted, State) ->
         PS when PS < State#socket_state.max_pool_size ->
             P =
                 riak_api_web_acceptor:start_link(
-                    State#socket_state.listener
+                    State#socket_state.listener,
+                    State#socket_state.port
                 ),
             {
                 noreply,
@@ -330,28 +332,28 @@ default_socket_options(IPAddr) ->
         {backlog, 128}
     ].
 
--spec get_acceptor_pool(socket(), list(option())) ->
+-spec get_acceptor_pool(socket(), inet:port_number(), list(option())) ->
     {list(pid()), pos_integer(), pos_integer()}.
-get_acceptor_pool(Listener, Options) ->
+get_acceptor_pool(Listener, Port, Options) ->
     StartSize =
-        case lists:keyfind(web_acceptor_pool_start_size, 1, Options) of
-            {web_acceptor_pool_start_size, SS} when is_integer(SS), SS > 0 ->
+        case lists:keyfind(acceptor_pool_start_size, 1, Options) of
+            {acceptor_pool_start_size, SS} when is_integer(SS), SS > 0 ->
                 SS;
             false ->
                 application:get_env(
                     riak_api,
-                    acceptor_pool_start_size,
+                    web_acceptor_pool_start_size,
                     ?POOL_SIZE_DEFAULT
                 )
         end,
     MaxSize =
-        case lists:keyfind(web_acceptor_pool_max_size, 1, Options) of
-            {web_acceptor_pool_start_size, MS} when is_integer(MS), MS > 0 ->
+        case lists:keyfind(acceptor_pool_max_size, 1, Options) of
+            {acceptor_pool_max_size, MS} when is_integer(MS), MS > 0 ->
                 MS;
             false ->
                 application:get_env(
                     riak_api,
-                    acceptor_pool_max_size,
+                    web_acceptor_pool_max_size,
                     ?POOL_SIZE_MAX_DEFAULT
                 )
         end,
@@ -362,7 +364,7 @@ get_acceptor_pool(Listener, Options) ->
             MaxSize >= StartSize
         ->
             {
-                start_acceptor_pool(Listener, StartSize),
+                start_acceptor_pool(Listener, Port, StartSize),
                 StartSize,
                 MaxSize
             };
@@ -373,17 +375,22 @@ get_acceptor_pool(Listener, Options) ->
                 [InvalidConfig]
             ),
             {
-                start_acceptor_pool(Listener, ?POOL_SIZE_DEFAULT),
+                start_acceptor_pool(Listener, Port, ?POOL_SIZE_DEFAULT),
                 ?POOL_SIZE_DEFAULT,
                 ?POOL_SIZE_MAX_DEFAULT
             }
     end.
 
--spec start_acceptor_pool(socket(), pos_integer()) -> list(pid()).
-start_acceptor_pool(Listener, Size) ->
+-spec start_acceptor_pool(
+    socket(),
+    inet:port_number(),
+    pos_integer()
+) ->
+    list(pid()).
+start_acceptor_pool(Listener, Port, Size) ->
     lists:map(
         fun(_I) ->
-            P = riak_api_web_acceptor:start_link(Listener),
+            P = riak_api_web_acceptor:start_link(Listener, Port),
             true = is_pid(P),
             P
         end,

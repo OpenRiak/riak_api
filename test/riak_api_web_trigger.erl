@@ -177,7 +177,7 @@ setup() ->
             {name, SpecName},
             {ip, IPAddr},
             {port, TestPort},
-            {web_acceptor_pool_start_size, 4}
+            {acceptor_pool_start_size, 4}
         ],
     {ok, _Pid} = riak_api_web_socket:start_link(Options),
     riak_api_web:add_routes([{10, ?MODULE}]),
