@@ -79,23 +79,49 @@ get_route(Port, Method, Path, SplitPath) ->
             {?MODULE, Port},
             persistent_term:get({?MODULE, default}, [])
         ),
-    select_route(CurrentRoutes, Method, Path, SplitPath).
+    select_route(CurrentRoutes, Method, Path, SplitPath, false).
 
-select_route([], _Method, _Path, _SP) ->
+-spec select_route(
+    list(route()),
+    riak_api_web_acceptor:method(),
+    unicode:chardata(),
+    list(unicode:chardata()),
+    false | {true, list(riak_api_web_acceptor:method())}
+) ->
+    {
+        ok,
+        module(),
+        {pos_integer(), pos_integer(), non_neg_integer()},
+        any()
+    }
+    | riak_api_web_acceptor:halt_response().
+select_route([], _Method, _Path, _SP, false) ->
     {halt, 404, [], <<>>, []};
-select_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath) ->
+select_route([], _Method, _Path, _SP, {true, AllowedMethods}) ->
+    AllowHdrVal =
+        iolist_to_binary(
+            lists:join(
+                <<", ">>,
+                lists:map(
+                    fun atom_to_binary/1,
+                    lists:usort(AllowedMethods)
+                )
+            )
+        ),
+    {halt, 405, [{'Allow', AllowHdrVal}], <<>>, []};
+select_route([{_P, CallbackMod} | Rest], Method, Path, SplitPath, MNA) ->
     case CallbackMod:match_route(Method, Path, SplitPath) of
         nomatch ->
-            select_route(Rest, Method, Path, SplitPath);
+            select_route(Rest, Method, Path, SplitPath, MNA);
         {method_not_allowed, AllowedMethods} ->
-            AllowHdrVal =
-                iolist_to_binary(
-                    lists:join(
-                        <<", ">>,
-                        lists:map(fun atom_to_binary/1, AllowedMethods)
-                    )
-                ),
-            {halt, 405, [{'Allow', AllowHdrVal}], <<>>, []};
+            UpdAMs =
+                case MNA of
+                    false ->
+                        AllowedMethods;
+                    {true, AlreadyAllowedMethods} ->
+                        AllowedMethods ++ AlreadyAllowedMethods
+                end,
+            select_route(Rest, Method, Path, SplitPath, {true, UpdAMs});
         {ok, {MaxHdrCount, MaxHdrSize, MaxBodySize}, Context} when
             MaxHdrCount > 0, MaxHdrSize > 0, MaxBodySize >= 0
         ->

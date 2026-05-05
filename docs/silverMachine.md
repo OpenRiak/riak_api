@@ -52,7 +52,9 @@ There are multiple routing tables - one for `default` routes, and one for each P
 
 Routes can be added using `riak_api_web:add_routes/1`, `riak_api_web:add_routes/2`.
 
-Not when implementing the `match_route/3` callback of a module, care needs to be taken when different modules support the same path but with different methods.  The routes will be checked until the first `ok` match or `method_not_allowed` match, and then no further routes will be checked.  Other, lower priority, routes will only be checked when `nomatch` is returned.
+For each module in the list the `Module:match_routes/3` function will be called, until a match is found.  For path mismatches, `nomatch` should be returned and for path matches with Method mismatches `{method_not_allowed, AllowedMethods}` should be returned from the callback function.
+
+Not when implementing the `match_route/3` callback of a module, different modules may support the same path but with different methods.  The routes will be checked until the first `ok` match.  If a `method_not_allowed` response is returned, routes will continue to be checked.  If subsequent routes also return `method_not_allowed`, and no matches are found, then a `405` (not a `404`) error response will be returned.  In that `405` response the list of Allowed Methods will be the union of all allowed methods returned from the individual `match_route/3` calls.
 
 In the current `riak_kv` implementation only `default` routes are set, so all HTTP/HTTPS listeners have the same functionality.
 
@@ -97,7 +99,7 @@ match_route('GET', <<"/types/T/buckets/B/keys/K">>, [<<"types">>, <<"T">>, <<"bu
 
 The split path (list) is trimmed of any leading or trailing empty elements e.g. "/stats/" and "/stats" will be equivalent.  The URL will be normalised and unquoted before calling `match_route/3` - e.g. handling any "\..\"-style directory traversal and % encoding of non-standard characters.
 
-All modules are tried until either an `ok` response or a `method_not_allowed` response is returned.  The `method_not_allowed` response will trigger a [HTTP 405](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/405) error response.
+All modules are tried until either an `ok` is returned.  If all modules return `nomatch` a '404' error is returned.  If at least one module returns `method_not_allowed` a [HTTP 405](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/405) error response will be triggered, with the allowed methods indicated in the response being the union of all methods returned in `method_not_allowed` responses.
 
 #### check_permissions
 
