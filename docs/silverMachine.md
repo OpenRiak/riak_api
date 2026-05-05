@@ -54,7 +54,7 @@ Routes can be added using `riak_api_web:add_routes/1`, `riak_api_web:add_routes/
 
 For each module in the list the `Module:match_routes/3` function will be called, until a match is found.  For path mismatches, `nomatch` should be returned and for path matches with Method mismatches `{method_not_allowed, AllowedMethods}` should be returned from the callback function.
 
-Not when implementing the `match_route/3` callback of a module, different modules may support the same path but with different methods.  The routes will be checked until the first `ok` match.  If a `method_not_allowed` response is returned, routes will continue to be checked.  If subsequent routes also return `method_not_allowed`, and no matches are found, then a `405` (not a `404`) error response will be returned.  In that `405` response the list of Allowed Methods will be the union of all allowed methods returned from the individual `match_route/3` calls.
+Note that different modules may support the same path but with different methods.  The routes will be checked until the first `ok` match; if a `method_not_allowed` response is returned, routes will continue to be checked.  If subsequent routes also return `method_not_allowed`, and no matches are found, then a `405` (not a `404`) error response will be returned.  In that `405` response the list of Allowed Methods will be the union of all allowed methods returned from the individual `match_route/3` calls.
 
 In the current `riak_kv` implementation only `default` routes are set, so all HTTP/HTTPS listeners have the same functionality.
 
