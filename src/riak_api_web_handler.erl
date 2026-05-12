@@ -126,9 +126,9 @@
 %% riak_api_web_body:req_body() record.  Calling riak_api_web_body:get_body/3
 %% will return the body, either in whole or one slice at a time (by setting a
 %% slice length as the second attribute of the get_body/3 function, and
-%% re submitting the req_body() returned into subsequent get_body/3 calls).
+%% re-submitting the req_body() returned into subsequent get_body/3 calls).
 %% 
-%% Thw headers in the response need not contain the following header elements
+%% The headers in the response need not contain the following header elements
 %% which will be generated automatically:
 %% - 'Server'
 %% - 'Date'

@@ -34,7 +34,7 @@ A listener is started using `riak_api_web_socket:start_link/1`, where the functi
 
 Within Riak the `riak_api_sup` sueprvisor is used to discover the bindings (IP and Port pairs) from the configuration, and start a listener for each binding.
 
-In addition to the passed-in options, three further options cna be set using environment variables:
+In addition to the passed-in options, three further options can be set using environment variables:
 
 - `riak_api/web_kernel_buffer` - which will set the TCP `buffer`;
 - `riak_api/web_receive_buffer` - which will set the TCP `recbuf`;
