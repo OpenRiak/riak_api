@@ -520,7 +520,7 @@ get_wikipedia_from_buffer_with_trailer_test() ->
             1024 * 1024
         ),
     MD5 = base64:encode(crypto:hash(md5, <<"Wikipedia in chunks.">>)),
-    Trailer = << <<"Encoded-CheckSum: ">>/binary, MD5/binary>>,
+    Trailer = <<<<"Encoded-CheckSum: ">>/binary, MD5/binary>>,
     OtherPackets = [<<"0\r\n">>, Trailer, <<"\r\n">>],
     RqBdy =
         RqBdyInit#req_body{spoof_socket = true, test_packets = OtherPackets},
