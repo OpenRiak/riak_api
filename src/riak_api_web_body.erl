@@ -117,7 +117,9 @@ confirm_empty(ReqBody) ->
 -spec get_body(
     req_body(), all | pos_integer(), pos_integer() | undefined
 ) ->
-    {binary() | done, req_body()} | {error, content_too_large}.
+    {binary() | done, req_body()}
+    | {error, content_too_large}
+    | {error, trailer_fields_not_supported}.
 get_body(#req_body{content_length = CL, max_size = MS}, _SL, _TO) when
     is_integer(CL), CL > MS
 ->
@@ -212,15 +214,19 @@ get_body(
                             Rest when is_binary(Rest) ->
                                 RqBdy#req_body{buffer = Rest}
                         end,
-                    <<"\r\n", Next/binary>> = get_buffer(FinalRqBdy),
-                    {
-                        RcvBuffer,
-                        FinalRqBdy#req_body{
-                            buffer = Next,
-                            chunk_buff = <<>>,
-                            transfer_complete = true
-                        }
-                    };
+                    case get_buffer(FinalRqBdy) of
+                        <<"\r\n", Next/binary>> ->
+                            {
+                                RcvBuffer,
+                                FinalRqBdy#req_body{
+                                    buffer = Next,
+                                    chunk_buff = <<>>,
+                                    transfer_complete = true
+                                }
+                            };
+                        _ ->
+                            {error, trailer_fields_not_supported}
+                    end;
                 {N, NextSize} when N > 0, NextSize =< MS ->
                     case byte_size(Rest) of
                         BS when BS >= ChunkSize ->
@@ -502,6 +508,26 @@ get_wikipedia_from_buffer_test() ->
     {Output, RqBdyEnd} = get_body(RqBdy, all, 1000),
     ?assertMatch(<<"Wikipedia in\r\n\r\nchunks.">>, Output),
     ?assertMatch(<<>>, get_buffer(RqBdyEnd)).
+
+get_wikipedia_from_buffer_with_trailer_test() ->
+    <<>> = dummy_extend_fun(<<>>, none, none),
+    {ok, RqBdyInit} =
+        initiate_body(
+            fun dummy_extend_fun/3,
+            <<"4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n">>,
+            chunked,
+            false,
+            1024 * 1024
+        ),
+    MD5 = base64:encode(crypto:hash(md5, <<"Wikipedia in chunks.">>)),
+    Trailer = << <<"Encoded-CheckSum: ">>/binary, MD5/binary>>,
+    OtherPackets = [<<"0\r\n">>, Trailer, <<"\r\n">>],
+    RqBdy =
+        RqBdyInit#req_body{spoof_socket = true, test_packets = OtherPackets},
+    ?assertMatch(
+        {error, trailer_fields_not_supported},
+        get_body(RqBdy, all, 1000)
+    ).
 
 dummy_extend_fun(B, _, _) when is_binary(B) -> B.
 
