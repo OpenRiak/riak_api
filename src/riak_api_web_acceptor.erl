@@ -304,12 +304,11 @@ normalise_path(URI) ->
             % so it is safe to parse rather than normalise
             uri_string:parse(URI);
         _ ->
-            case uri_string:normalize(URI, [return_map]) of
-                URIMap when is_map(URIMap) ->
-                    uri_string:percent_decode(URIMap);
-                {error, Type, Detail} ->
-                    {error, Type, Detail}
-            end
+            maps:update_with(
+                path,
+                fun uri_string:percent_decode/1,
+                uri_string:normalize(URI, [return_map])
+            )
     end.
 
 -spec split_path(
@@ -923,7 +922,20 @@ normalise_path_test() ->
     URI3 = <<"types/T/buckets/Swedes/keys/%C3%85berg?return_terms">>,
     {ok, {_, SP, _}} = split_path(URI3),
     [<<"types">>, <<"T">>, <<"buckets">>, <<"Swedes">>, <<"keys">>, Name] = SP,
-    ?assertMatch(<<"Åberg"/utf8>>, Name).
+    ?assertMatch(<<"Åberg"/utf8>>, Name),
+    URI4 = <<"buckets/B/keys/%41CME?co=Bausch+%26+Lomb+Canada+Inc.">>,
+    {ok, R4} = split_path(URI4),
+    ?assertMatch(
+        {
+            <<"buckets/B/keys/ACME">>,
+            [<<"buckets">>, <<"B">>, <<"keys">>, <<"ACME">>],
+            [{<<"co">>, <<"Bausch & Lomb Canada Inc.">>}]
+        },
+        R4
+    ),
+    URI5 = <<"types/BT/buckets/B/keys/12345?name=%C3%85berg">>,
+    {ok, {_P5, _SP5, QP5}} = split_path(URI5),
+    ?assertMatch([{<<"name">>, <<"Åberg"/utf8>>}], QP5).
 
 expect_test() ->
     FixedLength =
