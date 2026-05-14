@@ -67,9 +67,15 @@
 %% When called each route handled by this module must be checked, and either
 %% `nomatch` returned should none match - or the initial context with the
 %% limits for that route.
+%% The path is provided in two forms:
+%% - the first form is as a single binary, in a normalised form using
+%% Syntax-Based Normalization as defined by RFC 3986 (this will not percent 
+%% decode unicode elements in the path).
+%% - the second form is split into binaries for each path segment, with all
+%% percent encoded parts decoded, and trailing and leading "/"s ignored 
 -callback match_route(
     riak_api_web_acceptor:method(),
-    unicode:chardata(),
+    uri_string:uri_string(),
     list(unicode:chardata())
 ) -> 
     nomatch |

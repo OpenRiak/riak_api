@@ -297,20 +297,42 @@ compile_detectors() ->
     CP = binary:compile_pattern([<<"%">>, <<".">>]),
     persistent_term:put({?MODULE, compile_patterns}, CP).
 
--spec normalise_path(binary()) -> uri_string:uri_map() | uri_string:error().
+-spec normalise_path(
+    binary()
+) ->
+    {ok, uri_string:uri_map(), uri_string:uri_string()}
+    | uri_string:error()
+    | {error, decode_error, any()}.
 normalise_path(URI) ->
     CP = persistent_term:get({?MODULE, compile_patterns}),
     case binary:match(URI, CP) of
         nomatch ->
             % There is no percent-encoded content, or no path reversing, and
             % so it is safe to parse rather than normalise
-            uri_string:parse(URI);
+            case uri_string:parse(URI) of
+                URIMap when is_map(URIMap) ->
+                    {ok, URIMap, maps:get(path, URIMap, <<>>)};
+                URIError ->
+                    URIError
+            end;
         _ ->
-            maps:update_with(
-                path,
-                fun uri_string:percent_decode/1,
-                uri_string:normalize(URI, [return_map])
-            )
+            case uri_string:normalize(URI, [return_map]) of
+                URIMap when is_map(URIMap) ->
+                    PathD =
+                        uri_string:percent_decode(
+                            maps:get(path, URIMap, <<>>)
+                        ),
+                    case PathD of
+                        PathD when is_binary(PathD) ->
+                            {ok, URIMap, PathD};
+                        {error, {invalid, InvError}} ->
+                            {error, decode_error, {invalid, InvError}};
+                        {error, Term, Reason} ->
+                            {error, Term, Reason}
+                    end;
+                {error, Term, Reason} ->
+                    {error, Term, Reason}
+            end
     end.
 
 -spec split_path(
@@ -327,10 +349,10 @@ normalise_path(URI) ->
     | halt_response().
 split_path(URIPath) ->
     case normalise_path(URIPath) of
-        URIMap when is_map(URIMap) ->
+        {ok, URIMap, PathD} when is_binary(PathD) ->
             PathN = maps:get(path, URIMap, <<>>),
             QueryParamsN = maps:get(query, URIMap, <<>>),
-            SplitPath = binary:split(PathN, <<"/">>, [global, trim_all]),
+            SplitPath = binary:split(PathD, <<"/">>, [global, trim_all]),
             case uri_string:dissect_query(QueryParamsN) of
                 QueryParams when is_list(QueryParams) ->
                     {ok, {PathN, SplitPath, QueryParams}};
@@ -925,8 +947,9 @@ normalise_path_test() ->
     {ok, Output2} = split_path(URI2),
     ?assertMatch(Output1, Output2),
     URI3 = <<"types/T/buckets/Swedes/keys/%C3%85berg?return_terms">>,
-    {ok, {_, SP, _}} = split_path(URI3),
+    {ok, {FP, SP, _}} = split_path(URI3),
     [<<"types">>, <<"T">>, <<"buckets">>, <<"Swedes">>, <<"keys">>, Name] = SP,
+    ?assertMatch(<<"types/T/buckets/Swedes/keys/%C3%85berg">>, FP),
     ?assertMatch(<<"Åberg"/utf8>>, Name),
     URI4 = <<"buckets/B/keys/%41CME?co=Bausch+%26+Lomb+Canada+Inc.">>,
     {ok, R4} = split_path(URI4),
@@ -940,7 +963,11 @@ normalise_path_test() ->
     ),
     URI5 = <<"types/BT/buckets/B/keys/12345?name=%C3%85berg">>,
     {ok, {_P5, _SP5, QP5}} = split_path(URI5),
-    ?assertMatch([{<<"name">>, <<"Åberg"/utf8>>}], QP5).
+    ?assertMatch([{<<"name">>, <<"Åberg"/utf8>>}], QP5),
+    ?assertMatch(
+        {halt, 400, [], _, [invalid_uri, [0]]},
+        split_path(<<105, 110, 118, 97, 108, 105, 100, 0>>)
+    ).
 
 expect_test() ->
     FixedLength =
