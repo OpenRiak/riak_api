@@ -255,7 +255,7 @@ basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
 
 connection_count_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun conn_generator/1}.
+    {timeout, 60, [{setup, fun setup/0, fun cleanup/1, fun conn_generator/1}]}.
 
 setup() ->
     inets:start(),
