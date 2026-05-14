@@ -130,7 +130,7 @@ make(HeaderList) when is_list(HeaderList) ->
 %% @doc
 %% Specific constructor when forming response headers.
 %% With response headers it is not possible to lookup non-standard header keys,
-%% An the value may be a list if elements - that will be joined into a single
+%% and the value may be a list of elements - that will be joined into a single
 %% comma-separated value before creating the response header.
 -spec make_rsp_header([{header_key(), list(binary()) | binary()}]) ->
     headers().
