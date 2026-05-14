@@ -75,7 +75,17 @@ is_authorised(false, _, _ReqHeaders, _Peer, _AuthFun) ->
     {ok, undefined}.
 
 error_decoding_credentials(ErrorTerm) ->
-    ?LOG_WARNING("Error decoding credentials ~0p", [ErrorTerm]),
+    % Logging exceptions may leak password information.  This may be acceptable
+    % as it is an accepted consequence of using a plain text authentication
+    % mechanism.  However, to be relatively secure by default the log is
+    % disabled - but can be enabled by environment variable should there be a
+    % need to troubleshoot an issue.
+    case application:get_env(riak_api, log_security_exception, false) of
+        true ->
+            ?LOG_WARNING("Error decoding credentials ~0p", [ErrorTerm]);
+        false ->
+            ok
+    end,
     {halt, 400, [?TXT_HEADER], <<"Error decoding credentials">>, []}.
 
 %%%============================================================================

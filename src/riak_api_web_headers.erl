@@ -208,7 +208,7 @@ get_unique_value(K, H) ->
         {_OK, [V]} ->
             V;
         {_OK, VL} when is_list(VL) ->
-            case sets:to_list(sets:from_list(VL, [{version, 2}])) of
+            case lists:uniq(VL) of
                 [V] ->
                     V;
                 _ ->

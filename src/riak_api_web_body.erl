@@ -101,11 +101,11 @@ initiate_body(BufferFun, BdyBuffer, CLorChunk, UseGzip, MaxBodySize) ->
     }.
 
 -spec confirm_empty(
-    riak_api_web_body:req_body()
+    req_body()
 ) ->
-    {ok, riak_api_web_body:req_body()} | {error, content_too_large}.
+    {ok, req_body()} | {error, content_too_large}.
 confirm_empty(ReqBody) ->
-    case riak_api_web_body:get_body(ReqBody, all, 10000) of
+    case get_body(ReqBody, all, 10000) of
         {done, UpdBody} ->
             {ok, UpdBody};
         {<<>>, UpdBody} ->

@@ -55,10 +55,10 @@ add_routes(Routes) ->
     list(route())
 ) ->
     ok.
-add_routes(ServerName, Routes) ->
-    CurrentRoutes = persistent_term:get({?MODULE, ServerName}, []),
+add_routes(Port, Routes) ->
+    CurrentRoutes = persistent_term:get({?MODULE, routes, Port}, []),
     NewRoutes = lists:keysort(1, CurrentRoutes ++ Routes),
-    persistent_term:put({?MODULE, ServerName}, NewRoutes).
+    persistent_term:put({?MODULE, routes, Port}, NewRoutes).
 
 -spec get_route(
     inet:port_number(),
@@ -76,8 +76,8 @@ add_routes(ServerName, Routes) ->
 get_route(Port, Method, Path, SplitPath) ->
     CurrentRoutes =
         persistent_term:get(
-            {?MODULE, Port},
-            persistent_term:get({?MODULE, default}, [])
+            {?MODULE, routes, Port},
+            persistent_term:get({?MODULE, routes, default}, [])
         ),
     select_route(CurrentRoutes, Method, Path, SplitPath, false).
 

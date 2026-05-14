@@ -34,7 +34,7 @@
 
 -define(ACCEPT_TIMEOUT, 10000).
 -define(RECEIVE_TIMEOUT, 60000).
--define(CONTINUE_RESPONSE, <<"HTTP 1.1 100 Continue">>).
+-define(CONTINUE_RESPONSE, <<"HTTP/1.1 100 Continue\r\n\r\n">>).
 
 -type response_code() ::
     200..204
@@ -149,6 +149,8 @@ loop(Socket, InitBuffer, PeerIP, Cert, Port) ->
 handle_request(Socket, InitBuffer, PeerIP, Cert, Port) ->
     StartTime = os:system_time(microsecond),
     reset_version(),
+    % version could in theory change within a connection, and version is
+    % stored on the process dictionary
     RequestResult =
         maybe
             {ok, {Method, RawPath, Version, HdrBuffer}} ?=
@@ -289,7 +291,7 @@ reset_version() ->
 bad_request(Error, Subs) ->
     {halt, 400, [], Error, Subs}.
 
-%% @doc %% @doc Call this function when initialising API
+%% @doc Call this function when initialising API
 -spec compile_detectors() -> ok.
 compile_detectors() ->
     CP = binary:compile_pattern([<<"%">>, <<".">>]),
@@ -505,26 +507,24 @@ get_request_headers(Buffer, Socket, {MaxCount, MaxSize}) ->
 request_prefers_keepalive({1, 0}, ReqHeaders) ->
     %% https://www.rfc-editor.org/rfc/rfc7230#section-6.1
     %% Note that connection options are case insensitive
+    %% For performance - avoid the casefold if already lower case
     case riak_api_web_headers:get_value('Connection', ReqHeaders) of
+        <<"keep-alive">> ->
+            true;
         ConnectionOption when is_binary(ConnectionOption) ->
-            case string:casefold(ConnectionOption) of
-                <<"keep-alive">> ->
-                    true;
-                _ ->
-                    false
-            end;
+            string:casefold(ConnectionOption) == <<"keep-alive">>;
         _ ->
             false
     end;
 request_prefers_keepalive({1, 1}, ReqHeaders) ->
+    %% For performance - avoid the casefold if already lower case
     case riak_api_web_headers:get_value('Connection', ReqHeaders) of
+        <<"close">> ->
+            false;
+        <<"keep-alive">> ->
+            true;
         ConnectionOption when is_binary(ConnectionOption) ->
-            case string:casefold(ConnectionOption) of
-                <<"close">> ->
-                    false;
-                _ ->
-                    true
-            end;
+            string:casefold(ConnectionOption) =/= <<"close">>;
         _ ->
             true
     end.
@@ -614,8 +614,13 @@ handle_response({halt, RspCode, RspHeaders, RspBody, Socket}) ->
 ) ->
     ok | {error, term()}.
 send_continue(Socket, ReqHeaders) ->
-    case riak_api_web_headers:lookup(<<"expect">>, ReqHeaders, true) of
-        {_Key, [<<"100-continue">>]} ->
+    case
+        {
+            riak_api_web_headers:lookup(<<"expect">>, ReqHeaders, true),
+            get_version()
+        }
+    of
+        {{_Key, [<<"100-continue">>]}, {1, 1}} ->
             riak_api_web_socket:send(Socket, ?CONTINUE_RESPONSE);
         _Other ->
             ok

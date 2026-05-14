@@ -236,7 +236,7 @@ basic_handler_test_() ->
     <<
         "GET /randon_data?required_size=~w HTTP/1.1\r\n"
         "X-Riak-request_id: 1\r\n"
-        "Connection: close\r\n"
+        "Connection: Close\r\n"
         "Content-Length: 0\r\n"
         "\r\n"
     >>
@@ -398,7 +398,7 @@ pipeline_request_values(IPAddr, Port, Size) ->
             ),
         Requests =
             lists:map(
-                fun(I) -> ?REQUEST_BIN(I, Size, <<"keep-alive">>) end,
+                fun(I) -> ?REQUEST_BIN(I, Size, <<"Keep-Alive">>) end,
                 lists:seq(1, 5)
             ),
         Request = iolist_to_binary(Requests),

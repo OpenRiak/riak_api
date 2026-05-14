@@ -94,8 +94,11 @@
     port :: inet:port_number(),
     listener :: socket(),
     pool_size = ?POOL_SIZE_DEFAULT :: pos_integer(),
+    % the target number of acceptors always waiting
     max_pool_size = ?POOL_SIZE_MAX_DEFAULT :: pos_integer(),
-    acceptor_pool = sets:new([{version, 2}]) :: sets:set()
+    % the max total number of acceptors, either waiting or connected
+    acceptor_pool = sets:new([{version, 2}]) :: sets:set(),
+    connected_pool = sets:new([{version, 2}]) :: sets:set()
 }).
 
 -type socket_option() ::
@@ -194,8 +197,8 @@ set_max_pool_size(ServerName, MaxPoolSize) when is_integer(MaxPoolSize) ->
     ).
 
 -spec acceptor_accepted(pid()) -> ok.
-acceptor_accepted(Pid) ->
-    gen_server:cast(Pid, accepted).
+acceptor_accepted(ServerPid) ->
+    gen_server:cast(ServerPid, {accepted, self()}).
 
 -spec stop(server_name()) -> ok.
 stop(ServerName) ->
@@ -280,10 +283,13 @@ handle_cast({set_max_pool_size, MPS}, State) ->
             ),
             {noreply, State}
     end;
-handle_cast(accepted, State) ->
-    case State#socket_state.pool_size of
+handle_cast(
+    {accepted, ExP},
+    #socket_state{acceptor_pool = AP, connected_pool = CP} = State
+) ->
+    case sets:size(AP) + sets:size(CP) of
         PS when PS < State#socket_state.max_pool_size ->
-            P =
+            NwP =
                 riak_api_web_acceptor:start_link(
                     State#socket_state.listener,
                     State#socket_state.port
@@ -292,27 +298,77 @@ handle_cast(accepted, State) ->
                 noreply,
                 State#socket_state{
                     acceptor_pool =
-                        sets:add_element(P, State#socket_state.acceptor_pool),
-                    pool_size = PS + 1
+                        sets:add_element(
+                            NwP,
+                            sets:del_element(
+                                ExP,
+                                State#socket_state.acceptor_pool
+                            )
+                        ),
+                    connected_pool =
+                        sets:add_element(
+                            ExP,
+                            State#socket_state.connected_pool
+                        )
                 }
             };
         _ ->
             ?LOG_WARNING(
-                "Web connection pool reached limit of ~w",
-                [State#socket_state.pool_size]
+                "Web connection pool reached limit of ~w "
+                "acceptors busy ~w waiting ~w",
+
+                [
+                    State#socket_state.max_pool_size,
+                    sets:size(State#socket_state.connected_pool) + 1,
+                    sets:size(State#socket_state.acceptor_pool) - 1
+                ]
             ),
-            {noreply, State}
+            {
+                noreply,
+                State#socket_state{
+                    acceptor_pool =
+                        sets:del_element(
+                            ExP,
+                            State#socket_state.acceptor_pool
+                        ),
+                    connected_pool =
+                        sets:add_element(
+                            ExP,
+                            State#socket_state.connected_pool
+                        )
+                }
+            }
     end.
 
-handle_info({'EXIT', Pid, normal}, State) ->
-    {
-        noreply,
-        State#socket_state{
-            pool_size = State#socket_state.pool_size - 1,
-            acceptor_pool =
-                sets:del_element(Pid, State#socket_state.acceptor_pool)
-        }
-    };
+handle_info(
+    {'EXIT', ExP, normal},
+    #socket_state{acceptor_pool = AP, connected_pool = CP} = State
+) ->
+    case {sets:size(AP), sets:size(CP)} of
+        {APS, CPS} when
+            (APS + CPS) < State#socket_state.max_pool_size,
+            APS < State#socket_state.pool_size
+        ->
+            NwP =
+                riak_api_web_acceptor:start_link(
+                    State#socket_state.listener,
+                    State#socket_state.port
+                ),
+            {
+                noreply,
+                State#socket_state{
+                    acceptor_pool = sets:add_element(NwP, AP),
+                    connected_pool = sets:del_element(ExP, CP)
+                }
+            };
+        _ ->
+            {
+                noreply,
+                State#socket_state{
+                    connected_pool = sets:del_element(ExP, CP)
+                }
+            }
+    end;
 handle_info({'EXIT', Pid, Reason}, State) ->
     ?LOG_ERROR("Acceptor ~p unexpectedly crashed: ~0p", [Pid, Reason]),
     handle_info({'EXIT', Pid, normal}, State).

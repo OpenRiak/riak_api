@@ -250,10 +250,12 @@ record_request(Timings, Completion, Ctx) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--include_lib("stdlib/include/assert.hrl").
 
 basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
+
+connection_count_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun conn_generator/1}.
 
 setup() ->
     inets:start(),
@@ -265,7 +267,8 @@ setup() ->
             {name, SpecName},
             {ip, IPAddr},
             {port, TestPort},
-            {acceptor_pool_start_size, 4}
+            {acceptor_pool_start_size, 4},
+            {acceptor_pool_max_size, 10}
         ],
     {ok, _Pid} = riak_api_web_socket:start_link(Options),
     riak_api_web:add_routes([{20, ?MODULE}]),
@@ -287,10 +290,16 @@ generator({_SpecName, IPAddr, Port}) ->
         raw_put_toobig_object(IPAddr, Port)
     ].
 
+conn_generator({_SpecName, IPAddr, Port}) ->
+    [
+        put_all_pool(IPAddr, Port)
+    ].
+
 cleanup({SpecName, _IPAddr, _Port}) ->
     ok = inets:stop(),
     ?assertMatch(4, riak_api_web_socket:get_active_pool_size(SpecName)),
     riak_api_web_socket:stop(SpecName),
+    ets:delete(?MODULE),
     ok.
 
 raw_put_toobig_object({A, B, C, D}, Port) ->
@@ -357,7 +366,7 @@ raw_put_then_get_file({A, B, C, D}, Port) ->
         {ok, {{"HTTP/1.1", 200, "OK"}, _FetchHeaders, FetchBody}} =
             httpc:request(
                 get,
-                {URI, []},
+                {URI, [{"Connection", "close"}]},
                 [],
                 [{body_format, binary}],
                 test_client
@@ -430,7 +439,7 @@ put_then_get_file({A, B, C, D}, Port) ->
         {ok, {{"HTTP/1.1", 200, "OK"}, _FetchHeaders, FetchBody}} =
             httpc:request(
                 get,
-                {URI, []},
+                {URI, [{"Connection", "close"}]},
                 [],
                 [{body_format, binary}],
                 test_client
@@ -487,7 +496,7 @@ put_then_get({A, B, C, D}, Port) ->
         {ok, {{"HTTP/1.1", 200, "OK"}, _Rsp3Headers, Rsp3Body}} =
             httpc:request(
                 get,
-                {URI, []},
+                {URI, [{"Connection", "close"}]},
                 [],
                 [{body_format, binary}],
                 test_client
@@ -551,6 +560,47 @@ put_big_header({A, B, C, D}, Port) ->
         )
     end.
 
+put_all_pool(IP, Port) ->
+    fun() ->
+        Me = self(),
+        lists:foreach(
+            fun(K) ->
+                spawn(fun() -> continue_request(IP, Port, K, 64, 2000, Me) end)
+            end,
+            lists:map(fun to_pool_key/1, lists:seq(1, 10))
+        ),
+        ?assertMatch(ok, receive_loop(continue_received, 10)),
+        ?assertMatch(ok, receive_loop(complete, 10)),
+        lists:foreach(
+            fun(K) ->
+                spawn(fun() -> continue_request(IP, Port, K, 64, 2000, Me) end)
+            end,
+            lists:map(fun to_pool_key/1, lists:seq(11, 20))
+        ),
+        ?assertMatch(ok, receive_loop(continue_received, 10)),
+        ?assertException(
+            error,
+            {badmatch, {error, timeout}},
+            continue_request(IP, Port, to_pool_key(21), 64, 0, none)
+        ),
+        ?assertMatch(ok, receive_loop(complete, 10)),
+        ?assertMatch(
+            ok,
+            continue_request(IP, Port, to_pool_key(21), 64, 0, none)
+        )
+    end.
+
+receive_loop(_Msg, 0) ->
+    ok;
+receive_loop(Msg, Expected) ->
+    receive
+        Msg ->
+            receive_loop(Msg, Expected - 1)
+    end.
+
+to_pool_key(I) ->
+    list_to_binary(io_lib:format("PoolK~8..0B", [I])).
+
 find_available_port([]) ->
     no_port_found;
 find_available_port([Port | Rest]) ->
@@ -560,6 +610,60 @@ find_available_port([Port | Rest]) ->
             Port;
         _ ->
             find_available_port(Rest)
+    end.
+
+continue_request(IP, Port, Key, Length, Sleep, ReportPID) ->
+    {ok, Socket} =
+        gen_tcp:connect(
+            IP,
+            Port,
+            [binary, {packet, raw}, {active, false}]
+        ),
+    Rq =
+        io_lib:format(
+            <<
+                "PUT /ets_object/key/~s? HTTP/1.1\r\n"
+                "Connection: close\r\n"
+                "Content-Length: ~w\r\n"
+                "Expect: 100-continue\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "\r\n"
+            >>,
+            [Key, Length]
+        ),
+    BinRq = iolist_to_binary(Rq),
+    ok = gen_tcp:send(Socket, BinRq),
+    {ok, <<"HTTP/1.1 100 Continue\r\n\r\n">>} =
+        gen_tcp:recv(Socket, 0, 100),
+    case is_pid(ReportPID) of
+        true ->
+            ReportPID ! continue_received;
+        _ ->
+            ok
+    end,
+    timer:sleep(Sleep),
+    Value = crypto:strong_rand_bytes(Length),
+    ok = gen_tcp:send(Socket, Value),
+    {ok, Rsp} = gen_tcp:recv(Socket, 0),
+    {ok, Status, Rest} = erlang:decode_packet(line, Rsp, []),
+    ?assertMatch(
+        <<"HTTP/1.1 204 No Content\r\n">>,
+        Status
+    ),
+    ?assertMatch(
+        nomatch,
+        string:find(Rest, <<"Connection: keep-alive">>)
+    ),
+    ?assertNotMatch(
+        nomatch,
+        string:find(Rest, <<"Connection: close">>)
+    ),
+    ok = gen_tcp:close(Socket),
+    case is_pid(ReportPID) of
+        true ->
+            ReportPID ! complete;
+        _ ->
+            ok
     end.
 
 -endif.
