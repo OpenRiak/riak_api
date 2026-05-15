@@ -31,6 +31,7 @@
         add_routes/1,
         add_routes/2,
         get_route/4,
+        get_all_routes/0,
         spec_name/3,
         rfc1123_date/1,
         rfc1123_date/2,
@@ -74,12 +75,30 @@ add_routes(Port, Routes) ->
     }
     | riak_api_web_acceptor:halt_response().
 get_route(Port, Method, Path, SplitPath) ->
-    CurrentRoutes =
-        persistent_term:get(
-            {?MODULE, routes, Port},
-            persistent_term:get({?MODULE, routes, default}, [])
-        ),
-    select_route(CurrentRoutes, Method, Path, SplitPath, false).
+    select_route(current_routes(Port), Method, Path, SplitPath, false).
+
+-spec current_routes(pos_integer()) -> list(route()).
+current_routes(Port) ->
+    persistent_term:get(
+        {?MODULE, routes, Port},
+        persistent_term:get({?MODULE, routes, default}, [])
+    ).
+
+-spec get_all_routes() -> #{pos_integer() | default => list(route())}.
+get_all_routes() ->
+    maps:from_list(
+        lists:filtermap(
+            fun({K, V}) ->
+                case K of
+                    {?MODULE, routes, P} when is_integer(P); P == default ->
+                        {true, {P, V}};
+                    _ ->
+                        false
+                end
+            end,
+            persistent_term:get()
+        )
+    ).
 
 -spec select_route(
     list(route()),
@@ -140,18 +159,22 @@ get_listeners(Scheme) ->
     Listeners = application:get_env(riak_api, Scheme, []),
     lists:usort([{Scheme, Binding} || Binding <- Listeners]).
 
+-spec binding_config(
+    http | https,
+    {string() | tuple(), pos_integer()}
+) ->
+    supervisor:child_spec().
 binding_config(Scheme, Binding) ->
     {Ip, Port} = Binding,
     Name = spec_name(Scheme, Ip, Port),
     Config = spec_from_binding(Scheme, Name, Binding),
-
-    {
-        Name,
-        {riak_api_web_socket, start_link, [Config]},
-        permanent,
-        5000,
-        worker,
-        [riak_api_web_socket]
+    #{
+        id => Name,
+        start => {riak_api_web_socket, start_link, [Config]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [riak_api_web_socket]
     }.
 
 spec_from_binding(http, Name, {Ip, Port}) ->
@@ -177,17 +200,33 @@ spec_from_binding(https, Name, {Ip, Port}) ->
         common_config()
     ).
 
-spec_name(Scheme, Ip, Port) ->
+%% @doc For Ipv6 address - https://www.rfc-editor.org/rfc/rfc2732
+%% The expectation based on the cuttlefish IP datatype is that both IP4 and
+%% IP6 address will be returned as tuples of integers of full length (4 for IP4
+%% and 8 for IP6)
+%% However - cuttlefish may retain the parsed address as a string
+%% e.g.
+%% application:get_env(riak_api, http, []).
+%% [{"127.0.0.1",8098}]
+%% Either scenario is handled.
+%% There may be issues with addresses added by advanced.config in alternative
+%% formats - so backwards compatibility maintained (although ipV6 address now
+%% are encapsulated in [] in 4.0)
+spec_name(Scheme, Ip, Port) when is_integer(Port) ->
     FormattedIP =
         if
-            is_tuple(Ip); tuple_size(Ip) == 4 ->
+            is_tuple(Ip), tuple_size(Ip) == 4 ->
                 inet_parse:ntoa(Ip);
-            is_tuple(Ip); tuple_size(Ip) == 8 ->
+            is_tuple(Ip), tuple_size(Ip) == 8 ->
                 [$[, inet_parse:ntoa(Ip), $]];
             true ->
                 Ip
         end,
-    iolist_to_binary(io_lib:format("~s://~s:~p", [Scheme, FormattedIP, Port])).
+    iolist_to_binary(
+        lists:flatten(
+            io_lib:format("~s://~s:~w", [Scheme, FormattedIP, Port])
+        )
+    ).
 
 common_config() ->
     [
@@ -378,5 +417,67 @@ check_date_is_autocached_test() ->
             lists:seq(1, 100)
         ),
     rfc1123_date_now().
+
+spec_name_test() ->
+    %% Taken from https://www.rfc-editor.org/rfc/rfc2732 - but lowercase hex
+    Part = [16#FEDC, 16#BA98, 16#7654, 16#3210],
+    E1 = list_to_tuple(Part ++ Part),
+    E2 = {16#1080, 0, 0, 0, 8, 16#800, 16#200C, 16#417A},
+    E3 = {16#3FFE, 16#2A00, 16#100, 16#7031, 0, 0, 0, 1},
+    E4 = {16#1080, 0, 0, 0, 16#8, 16#800, 16#200C, 16#417A},
+    Scheme = http,
+    Port = 8080,
+    ?assertMatch(
+        <<"http://[fedc:ba98:7654:3210:fedc:ba98:7654:3210]:8080">>,
+        spec_name(Scheme, E1, Port)
+    ),
+    ?assertMatch(
+        <<"http://[1080::8:800:200c:417a]:8080">>,
+        spec_name(Scheme, E2, Port)
+        % this gets re-summarised by parse_address (not as in the RFC)
+    ),
+    ?assertMatch(
+        <<"http://[3ffe:2a00:100:7031::1]:8080">>,
+        spec_name(Scheme, E3, Port)
+    ),
+    ?assertMatch(
+        <<"http://[1080::8:800:200c:417a]:8080">>,
+        spec_name(Scheme, E4, Port)
+    ),
+    ?assertMatch(
+        <<"http://127.0.0.1:8098">>,
+        spec_name("http", "127.0.0.1", 8098)
+    ),
+    ?assertMatch(
+        <<"http://127.0.0.1:8098">>,
+        spec_name("http", {127, 0, 0, 1}, 8098)
+    ).
+
+load_routes_test() ->
+    clear_all_routes(),
+    add_routes(80, [{10, riak_api_web_ets_store}]),
+    add_routes([{20, riak_api_web_get_random}, {10, riak_api_web_trigger}]),
+    ?assertMatch(
+        [{10, riak_api_web_ets_store}],
+        current_routes(80)
+    ),
+    ?assertMatch(
+        [{10, riak_api_web_trigger}, {20, riak_api_web_get_random}],
+        current_routes(8000)
+    ),
+    AllRoutes =
+        #{
+            80 => [{10, riak_api_web_ets_store}],
+            default =>
+                [{10, riak_api_web_trigger}, {20, riak_api_web_get_random}]
+        },
+    ?assertMatch(AllRoutes, get_all_routes()),
+    clear_all_routes().
+
+clear_all_routes() ->
+    lists:foreach(
+        fun({P, _V}) -> persistent_term:erase({?MODULE, routes, P}) end,
+        maps:to_list(get_all_routes())
+    ).
 
 -endif.

@@ -30,12 +30,14 @@
 %% The module was initially a refactoring of the mochiweb_headers module.
 
 -module(riak_api_web_headers).
+
+-on_load(compile_separators/0).
+
 -export([make/1, make_rsp_header/1]).
 -export([enter_from_list/2, default_from_list/2, enter/3]).
 -export([get_value/2, get_unique_value/2, lookup/3, prefix_fold/3]).
 -export([parse_primary_header_value/1]).
 -export([output_response_block/1, parse_request_block/3]).
--export([compile_separators/0]).
 
 -define(KV_SEPARATOR, <<": ">>).
 -define(V_SEPARATOR, <<", ">>).
@@ -403,7 +405,7 @@ normalize_value(MultipleValues) when is_list(MultipleValues) ->
 normalize_value(FieldValue) when is_binary(FieldValue) ->
     {CP, WS} =
         persistent_term:get(
-            {?MODULE, compile_patterns},
+            {?MODULE, compiled_separators},
             {?V_SEPARATOR, ?OWS}
         ),
     lists:map(
@@ -423,7 +425,7 @@ normalize_value(FieldValue) when is_binary(FieldValue) ->
 compile_separators() ->
     CP = binary:compile_pattern(?V_SEPARATOR),
     WS = binary:compile_pattern(?OWS),
-    persistent_term:put({?MODULE, compile_patterns}, {CP, WS}).
+    persistent_term:put({?MODULE, compiled_separators}, {CP, WS}).
 
 %%%============================================================================
 %%% Eunit tests

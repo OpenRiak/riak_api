@@ -22,13 +22,15 @@
 
 -module(riak_api_web_acceptor).
 
+-on_load(compile_detectors/0).
+
 -if(?OTP_RELEASE == 26).
 -feature(maybe_expr, enable).
 -endif.
 
 -export([start_link/2, init/3]).
 
--export([extend_buffer/4, compile_detectors/0]).
+-export([extend_buffer/4]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -295,7 +297,7 @@ bad_request(Error, Subs) ->
 -spec compile_detectors() -> ok.
 compile_detectors() ->
     CP = binary:compile_pattern([<<"%">>, <<".">>]),
-    persistent_term:put({?MODULE, compile_patterns}, CP).
+    persistent_term:put({?MODULE, compiled_detectors}, CP).
 
 -spec normalise_path(
     binary()
@@ -304,7 +306,7 @@ compile_detectors() ->
     | uri_string:error()
     | {error, decode_error, any()}.
 normalise_path(URI) ->
-    CP = persistent_term:get({?MODULE, compile_patterns}),
+    CP = persistent_term:get({?MODULE, compiled_detectors}),
     case binary:match(URI, CP) of
         nomatch ->
             % There is no percent-encoded content, or no path reversing, and
