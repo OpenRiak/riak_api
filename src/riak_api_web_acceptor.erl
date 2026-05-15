@@ -32,6 +32,10 @@
 
 -export([extend_buffer/4]).
 
+-ifdef(TEST).
+-export([split_path/1]).
+-endif.
+
 -include_lib("kernel/include/logger.hrl").
 
 -define(ACCEPT_TIMEOUT, 10000).
