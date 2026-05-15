@@ -119,6 +119,7 @@ confirm_empty(ReqBody) ->
 ) ->
     {binary() | done, req_body()}
     | {error, content_too_large}
+    | {error, chunk_too_large}
     | {error, trailer_fields_not_supported}.
 get_body(#req_body{content_length = CL, max_size = MS}, _SL, _TO) when
     is_integer(CL), CL > MS
@@ -201,8 +202,10 @@ get_body(
         {ok, Line, Rest} when is_binary(Line) ->
             ChunkSize = get_chunk_size(Line),
             RcvBuffer = RqBdy#req_body.chunk_buff,
-            case {ChunkSize, ChunkSize + AS} of
-                {0, _} ->
+            case ChunkSize of
+                {error, chunk_too_large} ->
+                    {error, chunk_too_large};
+                0 ->
                     FinalRqBdy =
                         case Rest of
                             <<>> ->
@@ -227,9 +230,11 @@ get_body(
                         _ ->
                             {error, trailer_fields_not_supported}
                     end;
-                {N, NextSize} when N > 0, NextSize =< MS ->
-                    case byte_size(Rest) of
-                        BS when BS >= ChunkSize ->
+                N when N > 0 ->
+                    case {N + AS, byte_size(Rest)} of
+                        {NextSize, _BS} when NextSize > MS ->
+                            {error, content_too_large};
+                        {_NextSize, BS} when BS >= ChunkSize ->
                             <<Chunk:ChunkSize/binary, FurtherChunks/binary>> =
                                 Rest,
                             get_body(
@@ -242,7 +247,7 @@ get_body(
                                 SL,
                                 TO
                             );
-                        BS ->
+                        {_NextSize, BS} ->
                             Needed = ChunkSize - BS,
                             UpdRqBdy =
                                 extend_buffer(
@@ -261,25 +266,25 @@ get_body(
                                 SL,
                                 TO
                             )
-                    end;
-                {_N, _TooBig} ->
-                    {error, content_too_large}
+                    end
             end;
         {more, _} ->
             get_body(extend_buffer(RqBdy, line, TO), SL, TO)
     end.
 
--spec get_chunk_size(binary()) -> non_neg_integer().
+-spec get_chunk_size(binary()) -> non_neg_integer() | {error, chunk_too_large}.
 get_chunk_size(Line) ->
     case binary:split(string:trim(Line), <<";">>) of
-        [ChunkLength] ->
+        [ChunkLength] when byte_size(ChunkLength) =< 4 ->
             binary_to_integer(ChunkLength, 16);
-        [ChunkLength, _Ignore] ->
+        [ChunkLength, _Ignore] when byte_size(ChunkLength) =< 4 ->
             % There may be a chunk extension after a semi-colon for
             % progress tracking.
             % However, these are not expected in our use case, and
             % could hide security issues - so will ignore.
-            binary_to_integer(ChunkLength, 16)
+            binary_to_integer(ChunkLength, 16);
+        _ ->
+            {error, chunk_too_large}
     end.
 
 -spec extend_buffer(
@@ -576,7 +581,32 @@ toobig_chunking_test() ->
             spoof_socket = true,
             test_packets = Packets
         },
-    ?assertMatch({error, content_too_large}, get_body(RqBdyInit, all, 1000)).
+    ?assertMatch({error, content_too_large}, get_body(RqBdyInit, all, 1000)),
+    FakeBigChunk = integer_to_binary(16#FFFFFFFF + 1, 16),
+    PacketsWithBigChunk =
+        [
+            <<"4\r\n">>,
+            <<"Wiki\r\n">>,
+            <<FakeBigChunk/binary>>,
+            <<"\r\n">>,
+            <<"pedia\r\n">>,
+            <<"e\r\n">>,
+            <<" in\r\n\r\nchunks.\r\n">>,
+            <<"0\r\n">>,
+            <<"\r\n">>
+        ],
+    RqBdyInitFBC =
+        #req_body{
+            buffer = <<"">>,
+            content_length = chunked,
+            max_size = 20,
+            spoof_socket = true,
+            test_packets = PacketsWithBigChunk
+        },
+    ?assertMatch(
+        {error, chunk_too_large},
+        get_body(RqBdyInitFBC, all, 1000)
+    ).
 
 packet_testbin(<<>>, Acc) ->
     lists:reverse(Acc);

@@ -89,7 +89,11 @@ This callback function should attempt to match the module to the path, and eithe
 - a `nomatch` response indicating the module does not support that path (and so the next module in the route priority list should be tried).
 - a `method_not_allowed` response to indicate that the path matched but the method is not in the supported list of methods for this module.
 
-The `match_route` callback will receive 'Method' (an atom representing the HTTP request method), 'Path' (the full path as a binary string) and `Split Path` (the full path split into a list of individual elements separated by "/").
+The `match_route` callback will receive:
+
+- 'Method'; an atom representing the HTTP request method.
+- 'Path'; the full path as a binary string - using Syntax-Based Normalization as defined by [RFC 3986](https://www.ietf.org/rfc/rfc3986.txt).
+- 'Split Path'; the full path split into a list of individual elements separated by "/", with each element percent decoded.
 
 e.g. `GET /types/T/buckets/B/keys/K?returnbody=true HTTP/1.1` will lead to call to:
 
@@ -137,13 +141,23 @@ There is no handling of information in other request headers within Silver Machi
 
 #### process_request
 
-The process_request callback function will be passed a `riak_api_web_body:req_body/0` object, or the atom `none` if and only if it had been stipulated in the size limits returned from the `match_route/3` callback that only a 0-length body is supported.  Before providing a `none` request body, the buffer is checked by the acceptor to confirm no body has been provided (and a ['413 Content Too Large'](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/413) response is returned if there is a body present).
+The process_request callback function will be passed a `riak_api_web_body:req_body/0` object, or the atom `none`; as well as the context.
 
-At this stage the request body, if present, has not been read from the TCP buffer, and so sending of a large body will be suspended at the client (if the TCP window is full).  The acceptor (and the service it supports) is protected from a memory perspective until the body is fetched by the process_request callback function.  Fetching the body is managed through `riak_api_web_body:get_body/3` function, and the body may be fetched entirely, or partially up to a size limit.  Selecting the body in slices may be used if the intention is to slice and store large inbound requests without reading the whole request into memory.  There is no relationship between slices and chunks - slice sizes are defined on the server side, and chunk sizes are defined on the client side.
+The atom `none` is provided instead of a `req_body` if and only if it had been stipulated in the size limits returned from the `match_route/3` callback that only a 0-length body is supported.  Before providing a `none` request body, the buffer is checked by the acceptor to confirm no body has been provided (and a ['413 Content Too Large'](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/413) response is returned if there is a body present).
+
+At this stage the request body, if present, has not been read from the TCP buffer, and so sending of a large body will be suspended at the client (if the TCP window is full).  The acceptor (and the service it supports) is protected from a memory perspective until the body is fetched by the `process_request/2` callback function.  Fetching the body is managed through `riak_api_web_body:get_body/3` function, and the body may be fetched entirely, or partially up to a size limit.  Selecting the body in slices may be used if the intention is to slice and store large inbound requests without reading the whole request into memory.  There is no relationship between slices and chunks - slice sizes are defined on the server side, and chunk sizes are defined on the client side.
+
+Calls to the `riak_api_web_body:get_body/3` will return either:
+
+- `{binary(), req_body()}`; if the whole body has been requested it can be assumed the binary() is the whole body (no need to confirm by calling the function again to receive `done`).
+- `{done, req_body()}`; if there is no further body to be received.
+- `{error, content_too_large}`; the content has exceeded the limit returned from `match_route/3` callback.
+- `{error, chunk_too_large}`; an individual chunk has been sent that is >= 4GB.
+- `{error, trailer_fields_not_supported}`; a chunked encoded message has attempted to provided content after the end of the body, which is not presently supported in Silver Machine.
 
 The `process_request/2` callback function should not return a positive response unless the entirety of the body has been read.  If the reading of the body is curtailed then a `halt_response()` must be returned as otherwise the handling of further requests in a keepalive connection may be corrupted.
 
-A positive response must contain a response tuple as well as `ok` and the updated context object.  This tuple consists of:
+A positive response to `process_request/2` must contain a response tuple as well as `ok` and the updated context object.  This tuple consists of:
 
 ```erlang
 {
@@ -166,7 +180,6 @@ For an example stream function to return the body, see the `riak_kv_ag_index` mo
 #### record_request
 
 The record_request callback function is passed timing information from the handling of the request, as well as the request context object.  This is intended to be used for any statistics or logging activity required by the module.
-
 
 ## Limitations
 
