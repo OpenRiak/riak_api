@@ -255,7 +255,7 @@ basic_handler_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun generator/1}.
 
 connection_count_test_() ->
-    {timeout, 60, [{setup, fun setup/0, fun cleanup/1, fun conn_generator/1}]}.
+    {setup, fun setup/0, fun cleanup/1, fun conn_generator/1}.
 
 setup() ->
     inets:start(),
@@ -291,9 +291,7 @@ generator({_SpecName, IPAddr, Port}) ->
     ].
 
 conn_generator({_SpecName, IPAddr, Port}) ->
-    [
-        put_all_pool(IPAddr, Port)
-    ].
+    {timeout, 60, [put_all_pool(IPAddr, Port)]}.
 
 cleanup({SpecName, _IPAddr, _Port}) ->
     ok = inets:stop(),
