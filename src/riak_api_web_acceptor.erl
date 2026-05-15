@@ -22,11 +22,11 @@
 
 -module(riak_api_web_acceptor).
 
--on_load(compile_detectors/0).
-
 -if(?OTP_RELEASE == 26).
 -feature(maybe_expr, enable).
 -endif.
+
+-on_load(compile_detectors/0).
 
 -export([start_link/2, init/3]).
 
