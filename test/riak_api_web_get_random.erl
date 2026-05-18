@@ -49,12 +49,10 @@
 ).
 -endif.
 
--record(context,
-    {
-        request_id :: non_neg_integer()|undefined,
-        required_size :: non_neg_integer()|undefined
-    }
-).
+-record(context, {
+    request_id :: non_neg_integer() | undefined,
+    required_size :: non_neg_integer() | undefined
+}).
 
 -type context() :: #context{}.
 
@@ -65,10 +63,10 @@
     riak_api_web_acceptor:method(),
     unicode:chardata(),
     list(unicode:chardata())
-) -> 
-    nomatch |
-    {method_not_allowed, list(riak_api_web_acceptor:method())} |
-    {ok, riak_api_web_handler:limits(), context()}.
+) ->
+    nomatch
+    | {method_not_allowed, list(riak_api_web_acceptor:method())}
+    | {ok, riak_api_web_handler:limits(), context()}.
 match_route('GET', <<"/random_data">>, _SP) ->
     {ok, {10, 1024, 128 * 1024}, #context{}};
 match_route(_, <<"/random_data">>, _SP) ->
@@ -77,30 +75,28 @@ match_route(_, _, _) ->
     nomatch.
 
 %% @doc check_permissions for using this module or route
--spec
-    check_permissions(
-        riak_api_web_headers:headers(),
-        riak_api_web_socket:scheme(),
-        riak_api_web_handler:peer_ip(),
-        public_key:cert() | undefined,
-        context()
-    ) -> 
-        {ok, context()}.
+-spec check_permissions(
+    riak_api_web_headers:headers(),
+    riak_api_web_socket:scheme(),
+    riak_api_web_handler:peer_ip(),
+    public_key:cert() | undefined,
+    context()
+) ->
+    {ok, context()}.
 check_permissions(_Hdrs, _Scheme, _Peer, _Cert, Ctx) ->
     {ok, Ctx}.
 
 %% @doc parse and validate query params, passed as a map
--spec
-    parse_query_params(
-        riak_api_web_handler:query_params(),
-        context()
-    ) -> 
-        {ok, context()}|riak_api_web_acceptor:halt_response().
+-spec parse_query_params(
+    riak_api_web_handler:query_params(),
+    context()
+) ->
+    {ok, context()} | riak_api_web_acceptor:halt_response().
 parse_query_params([], #context{required_size = undefined}) ->
     {halt, 400, [], <<"no required_size parameter">>, []};
 parse_query_params([], Ctx) ->
     {ok, Ctx};
-parse_query_params([{<<"required_size">>, RS}|Rest], Ctx) ->
+parse_query_params([{<<"required_size">>, RS} | Rest], Ctx) ->
     try
         case binary_to_integer(RS) of
             RSI when is_integer(RSI), RSI >= 0 ->
@@ -109,19 +105,18 @@ parse_query_params([{<<"required_size">>, RS}|Rest], Ctx) ->
                 {halt, 400, [], <<"invalid required_size ~0p">>, [RS]}
         end
     catch
-        _ : _ ->
+        _:_ ->
             {halt, 400, [], <<"invalid required_size ~0p">>, [RS]}
     end;
-parse_query_params([_Other|Rest], Ctx) ->
+parse_query_params([_Other | Rest], Ctx) ->
     parse_query_params(Rest, Ctx).
 
 %% @doc parse and validate the request headers
--spec
-    parse_request_headers(
-        riak_api_web_headers:headers(),
-        context()
-    ) -> 
-        {ok, context()}|riak_api_web_acceptor:halt_response().
+-spec parse_request_headers(
+    riak_api_web_headers:headers(),
+    context()
+) ->
+    {ok, context()} | riak_api_web_acceptor:halt_response().
 parse_request_headers(ReqHeaders, Ctx) ->
     case riak_api_web_headers:lookup(?ID_HEADER_LWR, ReqHeaders, true) of
         undefined ->
@@ -135,7 +130,7 @@ parse_request_headers(ReqHeaders, Ctx) ->
             catch
                 error:badarg ->
                     {halt, 400, [], <<"invalid non-numeric request_id">>, []};
-                error:{badmatch,false} ->
+                error:{badmatch, false} ->
                     {halt, 400, [], <<"invalid negative request_id">>, []}
             end;
         {_OrigKey, MultipleIDs} when is_list(MultipleIDs) ->
@@ -143,24 +138,26 @@ parse_request_headers(ReqHeaders, Ctx) ->
     end.
 
 %% @doc Process the request and produce a response
--spec
-    process_request(
-        riak_api_web_body:req_body(),
-        context()
-    ) ->
+-spec process_request(
+    riak_api_web_body:req_body(),
+    context()
+) ->
+    {
+        ok,
         {
-            ok,
-            {
-                riak_api_web_acceptor:response_code(),
-                riak_api_web_headers:header_list(),
-                riak_api_web_handler:response_body(),
-                boolean(),
-                riak_api_web_body:req_body()
-            },
-            context()
-        }.
-process_request(RqBdy, Ctx = #context{request_id = RqID, required_size = RS})
-        when is_integer(RqID), is_integer(RS), RS > 0 ->
+            riak_api_web_acceptor:response_code(),
+            riak_api_web_headers:header_list(),
+            riak_api_web_handler:response_body(),
+            boolean(),
+            riak_api_web_body:req_body()
+        },
+        context()
+    }.
+process_request(
+    RqBdy, Ctx = #context{request_id = RqID, required_size = RS}
+) when
+    is_integer(RqID), is_integer(RS), RS > 0
+->
     Body = crypto:strong_rand_bytes(RS),
     RspHdr =
         {<<"X-Riak-request_id">>, integer_to_binary(RqID)},
@@ -175,7 +172,7 @@ process_request(RqBdy, Ctx = #context{request_id = RqID, required_size = RS})
     riak_api_web_handler:timings(),
     riak_api_web_handler:completion(),
     context()
-) -> 
+) ->
     ok.
 record_request(Timings, Completion, _Ctx) ->
     {A, B, C} = Timings,
@@ -184,7 +181,6 @@ record_request(Timings, Completion, _Ctx) ->
         "Request ~w with timings ~0p~n",
         [Completion, {B - A, C - B, C - A}]
     ).
-
 
 %%%============================================================================
 %%% Eunit tests
@@ -222,35 +218,29 @@ basic_handler_test_() ->
     )
 ).
 
--define(BAD_VERSION,
-    <<
-        "GET /random_data?required_size=~w HTTP1.1\r\n"
-        "X-Riak-request_id: 1\r\n"
-        "Connection: close\r\n"
-        "Content-Length: 0\r\n"
-        "\r\n"
-    >>
-).
+-define(BAD_VERSION, <<
+    "GET /random_data?required_size=~w HTTP1.1\r\n"
+    "X-Riak-request_id: 1\r\n"
+    "Connection: close\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n"
+>>).
 
--define(WRONG_URL,
-    <<
-        "GET /randon_data?required_size=~w HTTP/1.1\r\n"
-        "X-Riak-request_id: 1\r\n"
-        "Connection: Close\r\n"
-        "Content-Length: 0\r\n"
-        "\r\n"
-    >>
-).
+-define(WRONG_URL, <<
+    "GET /randon_data?required_size=~w HTTP/1.1\r\n"
+    "X-Riak-request_id: 1\r\n"
+    "Connection: Close\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n"
+>>).
 
--define(POST_NOT_GET,
-    <<
-        "POST /random_data?required_size=~w HTTP/1.1\r\n"
-        "X-Riak-request_id: 1\r\n"
-        "Connection: close\r\n"
-        "Content-Length: 0\r\n"
-        "\r\n"
-    >>
-).
+-define(POST_NOT_GET, <<
+    "POST /random_data?required_size=~w HTTP/1.1\r\n"
+    "X-Riak-request_id: 1\r\n"
+    "Connection: close\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n"
+>>).
 
 setup() ->
     inets:start(),
@@ -269,8 +259,7 @@ setup() ->
     riak_api_web:add_routes(TestPort, [{10, ?MODULE}]),
     {ok, _HTTPC} = inets:start(httpc, [{profile, test_client}]),
     ok = httpc:set_options([{verbose, false}], test_client),
-    {SpecName, IPAddr, TestPort}
-    .
+    {SpecName, IPAddr, TestPort}.
 
 generator({_SpecName, IPAddr, Port}) ->
     [
@@ -410,7 +399,7 @@ pipeline_request_values(IPAddr, Port, Size) ->
         R4 = validate_response(R3, Size, Socket),
         <<>> = validate_response(R4, Size, Socket),
         ok = gen_tcp:close(Socket)
-    end.        
+    end.
 
 extract_headers(Data, Socket, ExpectedResponseLine) ->
     maybe
@@ -433,7 +422,6 @@ extract_headers(Data, Socket, ExpectedResponseLine) ->
                             {more, undefined}
                     end
             end,
-
         {
             lists:map(
                 fun(S) -> hd(string:split(S, <<":">>, leading)) end,
@@ -480,7 +468,7 @@ validate_error(Data, ExpectedCode, Socket) ->
         case ExpectedCode of
             400 ->
                 {<<"HTTP/1.0 400 Bad Request\r\n">>, []};
-                    % As it was a bad version - can't assume 1.1
+            % As it was a bad version - can't assume 1.1
             404 ->
                 {<<"HTTP/1.1 404 Not Found\r\n">>, []};
             405 ->
@@ -500,12 +488,12 @@ validate_error(Data, ExpectedCode, Socket) ->
 
 find_available_port([]) ->
     no_port_found;
-find_available_port([Port|Rest]) ->
+find_available_port([Port | Rest]) ->
     case gen_tcp:listen(Port, []) of
-        {ok, Sock} -> 
+        {ok, Sock} ->
             ok = gen_tcp:close(Sock),
             Port;
-        _ -> 
+        _ ->
             find_available_port(Rest)
     end.
 
