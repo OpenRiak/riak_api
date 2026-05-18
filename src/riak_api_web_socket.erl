@@ -283,60 +283,36 @@ handle_cast({set_max_pool_size, MPS}, State) ->
     end;
 handle_cast(
     {accepted, ExP},
-    #socket_state{acceptor_pool = AP, connected_pool = CP} = State
+    #socket_state{pool_size = TargetAwaiting, max_pool_size = MaxPoolSize} =
+        State
 ) ->
-    case sets:size(AP) + sets:size(CP) of
-        PS when PS < State#socket_state.max_pool_size ->
-            NwP =
-                riak_api_web_acceptor:start_link(
-                    State#socket_state.listener,
-                    State#socket_state.port
+    AP1 = sets:del_element(ExP, State#socket_state.acceptor_pool),
+    CP1 = sets:add_element(ExP, State#socket_state.connected_pool),
+    AP2 =
+        case {sets:size(AP1), sets:size(CP1)} of
+            {APSz, CPSz} when
+                APSz < TargetAwaiting, (APSz + CPSz) < MaxPoolSize
+            ->
+                NwP =
+                    riak_api_web_acceptor:start_link(
+                        State#socket_state.listener,
+                        State#socket_state.port
+                    ),
+                sets:add_element(NwP, AP1);
+            {APSz, CPSz} when (APSz + CPSz) < MaxPoolSize ->
+                AP1;
+            {APSz, CPSz} ->
+                ?LOG_WARNING(
+                    "Web connection pool reached limit of ~w "
+                    "acceptors busy ~w waiting ~w",
+                    [MaxPoolSize, CPSz, APSz]
                 ),
-            {
-                noreply,
-                State#socket_state{
-                    acceptor_pool =
-                        sets:add_element(
-                            NwP,
-                            sets:del_element(
-                                ExP,
-                                State#socket_state.acceptor_pool
-                            )
-                        ),
-                    connected_pool =
-                        sets:add_element(
-                            ExP,
-                            State#socket_state.connected_pool
-                        )
-                }
-            };
-        _ ->
-            ?LOG_WARNING(
-                "Web connection pool reached limit of ~w "
-                "acceptors busy ~w waiting ~w",
-
-                [
-                    State#socket_state.max_pool_size,
-                    sets:size(State#socket_state.connected_pool) + 1,
-                    sets:size(State#socket_state.acceptor_pool) - 1
-                ]
-            ),
-            {
-                noreply,
-                State#socket_state{
-                    acceptor_pool =
-                        sets:del_element(
-                            ExP,
-                            State#socket_state.acceptor_pool
-                        ),
-                    connected_pool =
-                        sets:add_element(
-                            ExP,
-                            State#socket_state.connected_pool
-                        )
-                }
-            }
-    end.
+                AP1
+        end,
+    {
+        noreply,
+        State#socket_state{acceptor_pool = AP2, connected_pool = CP1}
+    }.
 
 handle_info(
     {'EXIT', ExP, normal},
