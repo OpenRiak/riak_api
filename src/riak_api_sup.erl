@@ -32,11 +32,18 @@
 -include_lib("kernel/include/logger.hrl").
 
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
--define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
 -define(LNAME(IP, Port), lists:flatten(io_lib:format("pb://~p:~p", [IP, Port]))).
--define(PB_LISTENER(IP, Port), {?LNAME(IP, Port),
-                                {riak_api_pb_listener, start_link, [IP, Port]},
-                                permanent, 5000, worker, [riak_api_pb_listener]}).
+-define(PB_LISTENER(IP, Port),
+    #{
+        id => ?LNAME(IP, Port),
+        start => {riak_api_pb_listener, start_link, [IP, Port]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [riak_api_pb_listener]
+    }
+).
+
 %% @doc Starts the supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
@@ -59,11 +66,17 @@ init([]) ->
 %% Generates child specs from the HTTP/HTTPS listener configuration.
 %% @private
 web_processes([]) ->
-    ?LOG_INFO("No HTTP/HTTPS listeners were configured, HTTP connections will be disabled."),
+    ?LOG_INFO(
+        "No HTTP/HTTPS listeners were configured, "
+        "HTTP connections will be disabled."
+    ),
     [];
 web_processes(Listeners) ->
-    lists:flatten([ web_listener_spec(Scheme, Binding) ||
-                      {Scheme, Binding} <- Listeners ]).
+    lists:flatten(
+        [
+            web_listener_spec(Scheme, Binding) || {Scheme, Binding} <- Listeners
+        ]
+    ).
 
 web_listener_spec(Scheme, Binding) ->
     riak_api_web:binding_config(Scheme, Binding).
