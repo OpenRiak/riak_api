@@ -37,6 +37,7 @@
 -define(ACCEPT_TIMEOUT, 10000).
 -define(RECEIVE_TIMEOUT, 60000).
 -define(CONTINUE_RESPONSE, <<"HTTP/1.1 100 Continue\r\n\r\n">>).
+-define(URI_SPLIT_OPTS, [global, trim_all]).
 
 -type response_code() ::
     200..204
@@ -296,45 +297,82 @@ bad_request(Error, Subs) ->
 %% @doc Call this function when initialising API
 -spec compile_detectors() -> ok.
 compile_detectors() ->
-    CP = binary:compile_pattern([<<"%">>, <<".">>]),
-    persistent_term:put({?MODULE, compiled_detectors}, CP).
+    DetectP = binary:compile_pattern([<<"%">>, <<".">>]),
+    SplitP = binary:compile_pattern(<<"/">>),
+    persistent_term:put({?MODULE, compiled_detectors}, {DetectP, SplitP}).
 
 -spec normalise_path(
     binary()
 ) ->
-    {ok, uri_string:uri_map(), uri_string:uri_string()}
+    {ok, uri_string:uri_map(), list(binary())}
     | uri_string:error()
     | {error, decode_error, any()}.
 normalise_path(URI) ->
-    CP = persistent_term:get({?MODULE, compiled_detectors}),
-    case binary:match(URI, CP) of
+    {DP, SP} = persistent_term:get({?MODULE, compiled_detectors}),
+    case binary:match(URI, DP) of
         nomatch ->
             % There is no percent-encoded content, or no path reversing, and
             % so it is safe to parse rather than normalise
             case uri_string:parse(URI) of
                 URIMap when is_map(URIMap) ->
-                    {ok, URIMap, maps:get(path, URIMap, <<>>)};
+                    {
+                        ok,
+                        URIMap,
+                        binary:split(
+                            maps:get(path, URIMap, <<>>),
+                            SP,
+                            ?URI_SPLIT_OPTS
+                        )
+                    };
                 URIError ->
                     URIError
             end;
         _ ->
+            % There may be encoded terms to handle, so must normalise not parse
+            % Once the terms have been split they must also be decoded.  Do not
+            % decode before splitting as reserved characters e.g. %2F will not
+            % handled correctly
             case uri_string:normalize(URI, [return_map]) of
                 URIMap when is_map(URIMap) ->
                     PathD =
-                        uri_string:percent_decode(
-                            maps:get(path, URIMap, <<>>)
+                        lists:map(
+                            fun percent_decode/1,
+                            binary:split(
+                                maps:get(path, URIMap, <<>>),
+                                SP,
+                                ?URI_SPLIT_OPTS
+                            )
                         ),
-                    case PathD of
-                        PathD when is_binary(PathD) ->
+                    case lists:all(fun is_binary/1, PathD) of
+                        true ->
                             {ok, URIMap, PathD};
-                        {error, {invalid, InvError}} ->
-                            {error, decode_error, {invalid, InvError}};
-                        {error, Term, Reason} ->
-                            {error, Term, Reason}
+                        false ->
+                            get_first_error(PathD)
                     end;
                 {error, Term, Reason} ->
                     {error, Term, Reason}
             end
+    end.
+
+-spec percent_decode(binary()) ->
+    binary() | {error, invalid_percent_encoding | invalid_utf8, binary()}.
+percent_decode(Bin) ->
+    try
+        uri_string:percent_decode(Bin)
+    catch
+        throw:{error, InvalidAtom, Hex} when is_atom(InvalidAtom) ->
+            {error, InvalidAtom, Hex}
+    end.
+
+-type decoded_output() ::
+    uri_string:uri_string()
+    | {error, invalid_percent_encoding | invalid_utf8, binary()}.
+
+-spec get_first_error(list(decoded_output())) -> {error, decode_error, any()}.
+get_first_error(SplitPath) ->
+    case hd(lists:dropwhile(fun is_binary/1, SplitPath)) of
+        {error, Type, _Bin} ->
+            {error, decode_error, Type}
     end.
 
 -spec split_path(
@@ -351,10 +389,9 @@ normalise_path(URI) ->
     | halt_response().
 split_path(URIPath) ->
     case normalise_path(URIPath) of
-        {ok, URIMap, PathD} when is_binary(PathD) ->
+        {ok, URIMap, SplitPath} ->
             PathN = maps:get(path, URIMap, <<>>),
             QueryParamsN = maps:get(query, URIMap, <<>>),
-            SplitPath = binary:split(PathD, <<"/">>, [global, trim_all]),
             case uri_string:dissect_query(QueryParamsN) of
                 QueryParams when is_list(QueryParams) ->
                     {ok, {PathN, SplitPath, QueryParams}};
@@ -969,7 +1006,25 @@ normalise_path_test() ->
     ?assertMatch(
         {halt, 400, [], _, [invalid_uri, [0]]},
         split_path(<<105, 110, 118, 97, 108, 105, 100, 0>>)
-    ).
+    ),
+    ?assertMatch(
+        {ok, {<<"/..%2F..">>, [<<"../..">>], []}},
+        split_path(<<"http://127.0.0.1:8443/..%2F..?">>)
+    ),
+    {halt, 400, [], ErrMsg7, Subs7} =
+        split_path(<<"https://example.com:80/%H0">>),
+    ?assertMatch(
+        <<"Path cannot be normalized ~w - ~0p">>,
+        ErrMsg7
+    ),
+    ?assert(is_binary(iolist_to_binary(io_lib:format(ErrMsg7, Subs7)))),
+    {halt, 400, [], ErrMsg8, Subs8} =
+        split_path(<<"https://example.com:80/%80">>),
+    ?assertMatch(
+        <<"Path cannot be normalized ~w - ~0p">>,
+        ErrMsg8
+    ),
+    ?assert(is_binary(iolist_to_binary(io_lib:format(ErrMsg8, Subs8)))).
 
 expect_test() ->
     FixedLength =
