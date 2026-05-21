@@ -27,7 +27,7 @@ prop_uri_gen(N) ->
                     if Normalize /= uri -> invalid_uri;
                        true -> {dot_segment, string:find(URIBin, "..") /= nomatch}
                     end,
-        collect(with_title(fault_injection), Normalize,
+        collect(with_title(fault_injection), Fault,
           check_distribution(positive, 9*(100-N)/1000, Normalize == uri,
             check_distribution(negative, 9*N/1000, Normalize /= uri,
               Normalize == uri orelse Fault /= none))))
@@ -45,6 +45,7 @@ prop_split_path() ->
         case riak_api_web_acceptor:split_path(URIBin) of
             {ok, {Path, DecodedPath, Params}} ->
                 StartWithSlash = starts_with_slash(Path),
+                collect(with_title(params), length(Params),
                 ?WHENFAIL(eqc:format("BinURI: ~p, Path: ~p, StartWithSlash: ~p, DecodedPath: ~p, Params: ~p\n",
                                     [URIBin, Path, StartWithSlash, DecodedPath, Params]),
                 conjunction(
@@ -53,7 +54,7 @@ prop_split_path() ->
                     [{slash_path, equal_path(string:trim(Path, trailing, "/"), mk_path(StartWithSlash, DecodedPath))}
                     || ends_with_slash(Path) ] ++
                     [{params, equals(Params, maps:get(query, URIMap, []))} || maps:get(query, URIMap, []) /= [{~"", true}] ]
-                ));
+                )));
              {halt, Status, _, _Msg, _} ->
                   ?WHENFAIL(eqc:format("BinURI: ~p, Status: ~p\n", [URIBin, Status]),
                       Fault /= none)
@@ -88,7 +89,7 @@ uri_pair() ->
                 {URIMap, unicode:characters_to_nfc_binary(URI), non_normalizable}
             end
         catch _:_ ->
-            {URIMap, recompose(URIMap), crash}
+            {URIMap, recompose(URIMap), non_recomposable}
         end).
 
 uri_map() ->
@@ -111,10 +112,14 @@ valid_path_element() ->
               ]).
 
 query_param() ->
-    {unicode(), frequency([{9, unicode()}, {1, true}])}.
+    {unicode(), frequency([{1, digits()}, {9, unicode()}, {1, true}])}.
 
 unicode() ->
   ?LET(Chars, list(choose(26, 16#D7FF)),
+       unicode:characters_to_nfc_binary(Chars)).
+
+digits() ->
+  ?LET(Chars, list(choose($0, $9)),
        unicode:characters_to_nfc_binary(Chars)).
 
 %% helper functions
