@@ -40,7 +40,7 @@
 -export([output_response_block/1, parse_request_block/3]).
 
 -define(KV_SEPARATOR, <<": ">>).
--define(V_SEPARATOR, <<", ">>).
+-define(V_SEPARATOR, [<<", ">>, <<",">>]).
 -define(L_SEPARATOR, <<"\r\n">>).
 -define(OWS, [<<" ">>, <<"\t">>]).
 
@@ -336,10 +336,10 @@ parse_request_block(Buffer, BufferFun, {MaxCount, MaxSize}, {HeaderAcc, C}) ->
 -spec join_values(list(unicode:chardata())) -> binary().
 -if(?OTP_RELEASE >= 28).
 join_values(VL) ->
-    binary:join(VL, ?V_SEPARATOR).
+    binary:join(VL, <<", ">>).
 -else.
 join_values(VL) ->
-    iolist_to_binary(lists:join(?V_SEPARATOR, VL)).
+    iolist_to_binary(lists:join(<<", ">>, VL)).
 -endif.
 
 -spec filter_headers(
@@ -475,6 +475,22 @@ parse_block_test() ->
             "\r\n"
         >>,
     parse_block_tester(RequestHeader1, RequestHeader2).
+
+parse_block_spacefree_test() ->
+    RequestHeader1 =
+        <<
+            "content-length: 1024\r\n"
+            "x-riak-Index-field1_bin:  NAME1|DOB1,NAME2|DOB1\r\n"
+            "x-riak-index-Field1_bin:NAME3|DOB1\r\n"
+            "X-Riak-Index-field2_bin: POSTCODE1|DOB1\r\n"
+        >>,
+    RequestHeader2 =
+        <<
+            "x-riak-index-field2_bin: POSTCODE2|DOB1\r\n"
+            "\r\n"
+        >>,
+    parse_block_tester(RequestHeader1, RequestHeader2).
+
 
 parse_splitblock_test() ->
     RequestHeader1 =
