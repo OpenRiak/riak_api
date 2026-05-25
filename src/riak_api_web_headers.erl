@@ -491,7 +491,6 @@ parse_block_spacefree_test() ->
         >>,
     parse_block_tester(RequestHeader1, RequestHeader2).
 
-
 parse_splitblock_test() ->
     RequestHeader1 =
         <<
