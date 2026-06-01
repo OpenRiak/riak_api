@@ -5,10 +5,10 @@
          prop_uri_gen/1,
          prop_split_path/0]).
 
--doc """
-Test the generator for URIs, ensuring that it produces both valid URIs that can be normalized
-as well as URIs on which normalization fails.
-""".
+% -doc """
+% Test the generator for URIs, ensuring that it produces both valid URIs that can be normalized
+% as well as URIs on which normalization fails.
+% """.
 -spec prop_uri_gen() -> eqc:property().
 prop_uri_gen() ->
     prop_uri_gen(3).
@@ -34,9 +34,9 @@ prop_uri_gen(N) ->
         end)).
 
 
--doc """
-Verify that for a given URI, the path and query parameters are correctly extracted by `riak_api_web_acceptor:split_path/1`.
-""".
+% -doc """
+% Verify that for a given URI, the path and query parameters are correctly extracted by `riak_api_web_acceptor:split_path/1`.
+% """.
 -spec prop_split_path() -> eqc:property().
 prop_split_path() ->
     fault_rate(3, 100,
@@ -53,7 +53,7 @@ prop_split_path() ->
                     || not ends_with_slash(Path)] ++
                     [{slash_path, equal_path(string:trim(Path, trailing, "/"), mk_path(StartWithSlash, DecodedPath))}
                     || ends_with_slash(Path) ] ++
-                    [{params, equals(Params, maps:get(query, URIMap, []))} || maps:get(query, URIMap, []) /= [{~"", true}] ]
+                    [{params, equals(Params, maps:get(query, URIMap, []))} || maps:get(query, URIMap, []) /= [{<<"">>, true}] ]
                 )));
              {halt, Status, _, _Msg, _} ->
                   ?WHENFAIL(eqc:format("BinURI: ~p, Status: ~p\n", [URIBin, Status]),
@@ -133,13 +133,13 @@ ends_with_slash(String) ->
 starts_with_slash(String) ->
     string:prefix(String, "/") /= nomatch.
 
-mk_path(_, []) -> ~"";
+mk_path(_, []) -> <<"">>;
 mk_path(true, DecodedPath) -> filename:join(["/" | DecodedPath]);
 mk_path(false, DecodedPath) -> filename:join(DecodedPath).
 
--doc """
-A recomposition of a generated URI string even if it contains certain injected faults.
-""".
+% -doc """
+% A recomposition of a generated URI string even if it contains certain injected faults.
+% """.
 recompose(URIMap) ->
     %% Build Query map with potential injected faults in it
     URI =
