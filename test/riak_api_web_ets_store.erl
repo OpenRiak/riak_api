@@ -638,7 +638,6 @@ continue_request(IP, Port, Key, Length, Sleep, ReportPID) ->
     ok = gen_tcp:send(Socket, BinRq),
     {ok, <<"HTTP/1.1 100 Continue\r\n\r\n">>} =
         gen_tcp:recv(Socket, 0, 100),
-    io:format(user, "Continue received ~w~n", [self()]),
     case is_pid(ReportPID) of
         true ->
             ReportPID ! {continue_received, self()};
@@ -649,7 +648,6 @@ continue_request(IP, Port, Key, Length, Sleep, ReportPID) ->
     Value = crypto:strong_rand_bytes(Length),
     ok = gen_tcp:send(Socket, Value),
     {ok, Rsp} = gen_tcp:recv(Socket, 0),
-    io:format(user, "Response received at ~w~n", [self()]),
     {ok, Status, Rest} = erlang:decode_packet(line, Rsp, []),
     ?assertMatch(
         <<"HTTP/1.1 204 No Content\r\n">>,
