@@ -10,3 +10,5 @@ ebin
 _build/
 rebar.lock
 log/*
+/.eqc-info
+/current_counterexample.eqc

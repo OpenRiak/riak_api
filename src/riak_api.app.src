@@ -9,9 +9,7 @@
                   stdlib,
                   ssl,
                   riak_core,
-                  riak_pb,
-                  webmachine,
-                  mochiweb
+                  riak_pb
                  ]},
   {registered, [riak_api_sup,
                 riak_api_pb_sup]},
