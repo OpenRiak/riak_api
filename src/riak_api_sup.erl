@@ -2,7 +2,8 @@
 %%
 %% riak_api_sup: supervise the Riak API services
 %%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2012-2013 Basho Technologies, Inc.
+%% Copyright (c) 2023 Workday, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -34,9 +35,9 @@
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
 -define(LNAME(IP, Port), lists:flatten(io_lib:format("pb://~p:~p", [IP, Port]))).
--define(PB_LISTENER(IP, Port), {?LNAME(IP, Port),
-                                {riak_api_pb_listener, start_link, [IP, Port]},
-                                permanent, 5000, worker, [riak_api_pb_listener]}).
+-define(PB_LISTENER(Mod, IP, Port), {?LNAME(IP, Port),
+                                {Mod, start_link, [IP, Port]},
+                                permanent, 5000, worker, [Mod]}).
 %% @doc Starts the supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
@@ -51,7 +52,7 @@ start_link() ->
 init([]) ->
     Helper = ?CHILD(riak_api_pb_registration_helper, worker),
     Registrar = ?CHILD(riak_api_pb_registrar, worker),
-    PBProcesses = pb_processes(riak_api_pb_listener:get_listeners()),
+    PBProcesses = pb_processes(),
     WebProcesses = web_processes(riak_api_web:get_listeners()),
     NetworkProcesses = PBProcesses ++ WebProcesses,
     {ok, {{one_for_one, 10, 10}, [Helper, Registrar|NetworkProcesses]}}.
@@ -70,11 +71,16 @@ web_listener_spec(Scheme, Binding) ->
 
 %% Generates child specs from the PB listener configuration.
 %% @private
-pb_processes([]) ->
-    ?LOG_INFO("No PB listeners were configured, PB connections will be disabled."),
-    [];
-pb_processes(Listeners) ->
-    [?CHILD(riak_api_pb_sup, supervisor)| pb_listener_specs(Listeners)].
-
-pb_listener_specs(Pairs) ->
-    [ ?PB_LISTENER(IP, Port) || {IP, Port} <- Pairs ].
+-spec pb_processes() -> list(supervisor:child_spec()).
+pb_processes() ->
+    case riak_api_pb_listener:get_listeners() of
+        [] ->
+            ?LOG_INFO(
+                "No PB listeners were configured,"
+                " PB connections will be disabled."),
+            [];
+        Endpoints ->
+            ListenerSpecs =
+                [?PB_LISTENER(riak_api_pb_listener, IP, Port) || {IP, Port} <- Endpoints],
+            [?CHILD(riak_api_pb_sup, supervisor) | ListenerSpecs]
+    end.
